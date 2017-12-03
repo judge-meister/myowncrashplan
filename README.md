@@ -4,7 +4,7 @@
 
 * Quick summary - This is a simple backup solution for those with a small linux server and a laptop also running linux or macOs.
  
-* Version - 0.1
+* Version - 0.2
 
 * [Learn Markdown](https://bitbucket.org/tutorials/markdowndemo)
 

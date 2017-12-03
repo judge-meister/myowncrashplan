@@ -19,7 +19,7 @@ if len(sys.argv) > 1:
 if DRYRUN:
     print "DRYRUN", DRYRUN
 
-print "\nThis is the installer for myowncrashplan (version 0.1).\n"
+print "\nThis is the installer for myowncrashplan (version 0.2).\n"
 
 
 # 1. ask installer for location of backup dir
@@ -73,7 +73,12 @@ while not FINISHED:
     else:
         FINISHED=True
 
-FORMATTED_SRC = '"'+'"\n         "'.join(SRC)+'"\n         '
+c=1
+FORMATTED_SRC=""
+for x in SRC:
+    FORMATTED_SRC+="%d: %s\n" % (c,x)
+    c+=1
+#FORMATTED_SRC = '"'+'"\n         "'.join(SRC)+'"\n         '
 
 print "\nWe need to install files in /usr/local/bin /etc/logrotate.d so we "
 print "need to use sudo and ask for your password.\n"
@@ -84,7 +89,7 @@ SCRIPT_BIN="/usr/local/bin"
 #SCRIPT_BIN="/home/judge/bin"
 if os.path.exists(SCRIPT_BIN): 
     if not DRYRUN:
-        s,o=unix('sudo cp -f myowncrashplan.sh %s' % SCRIPT_BIN)
+        s,o=unix('sudo cp -f myowncrashplan.py %s' % SCRIPT_BIN)
         # set permissions of file
         if s != 0:
             print o
@@ -97,28 +102,27 @@ else:
 
 # 5. create ~/.myowncrashplanrc)
 rc="""
-# .myowncrashplanrc
+# .myowncrashplan.ini
 
+[myocp]
 # HOST_WIFI is the IP Address of the machine to be backed up
-HOST_WIFI=%s
+host_wifi: %s
 
 # BACKUPDIR is the absolute location on the server to store the backups
-BACKUPDIR=%s/myowncrashplan
+backupdir: %s/myowncrashplan
 
 # SOURCES is a list of locations on the laptop to be backed up
 # should be absolute paths and each must NOT end in /
-SOURCES=(%s)
-
-# file to store date of last backup
-DATEFILE=${BACKUPDIR}/.date
+[sources]
+%s
 
 """ % (IPADDRESS, TGTDIR, FORMATTED_SRC)
 
-print "Created %s/.myowncrashplanrc" % os.environ['HOME']
+print "Created %s/.myowncrashplan.ini" % os.environ['HOME']
 if DRYRUN:
     print "-----------------------------------------\n%s-----------------------------------------" % rc
 else:
-    open(os.path.join(os.environ['HOME'],'.myowncrashplanrc'),'w').write(rc)
+    open(os.path.join(os.environ['HOME'],'.myowncrashplan.ini'),'w').write(rc)
 
 
 # 6. install /etc/logrotate.d/myowncrashplan
@@ -164,20 +168,21 @@ Temporary Items
 Saved Application State
 Library/Caches/Google/Chrome
 """
-print "Created %s" % (os.path.join(TGTDIR,'myowncrashplan','rsync_excl'))
+
+print "Created %s" % (os.path.join(TGTDIR, 'myowncrashplan', 'rsync_excl'))
 if DRYRUN:
     print "-----------------------------------------\n%s-----------------------------------------" % excl
 else:
-    open(os.path.join(TGTDIR,'myowncrashplan','rsync_excl'),'w').write(excl)
+    open(os.path.join(TGTDIR, 'myowncrashplan', 'rsync_excl'), 'w').write(excl)
 
 
 # 8. install cron job
 #print "[still need to create cron job]\n"
 
-cronjob="*/60 * * * * %s/myowncrashplan.sh" % SCRIPT_BIN
+cronjob="*/60 * * * * %s/myowncrashplan.py" % SCRIPT_BIN
 s,o = unix("crontab -l 2>/dev/null")
 if s == 0:
-    if o.find('myowncrashplan.sh') != -1:
+    if o.find('myowncrashplan.py') != -1 or o.find('myowncrashplan.sh') != -1:
         print "\nWARNING: Looks like a previous myowncrashplan cronjob exists."
         print "         Use crontab -e to remove or edit the job.\n"
     if o.find(cronjob) == -1:
@@ -192,6 +197,6 @@ if s == 0:
             print cronjob
 
 """
-*/60 * * * * /home/judge/bin/myowncrashplan.sh
-(crontab -l 2>/dev/null; echo "*/60 * * * * /home/judge/bin/myowncrashplan.sh") | crontab -
+*/60 * * * * /home/judge/bin/myowncrashplan.py
+(crontab -l 2>/dev/null; echo "*/60 * * * * /home/judge/bin/myowncrashplan.py") | crontab -
 """
