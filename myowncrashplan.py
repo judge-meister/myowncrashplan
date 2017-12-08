@@ -4,10 +4,11 @@ import os
 import sys
 import stat
 import time
+import shutil
 import ConfigParser
 from commands import getstatusoutput as unix
 
-RSYNC_OPTS = "--log-file=myowncrashplan.log --quiet --bwlimit=5000 --timeout=300 --delete-excluded --exclude-from=rsync_excl"
+RSYNC_OPTS = "--log-file=myowncrashplan.log --quiet --bwlimit=5000 --timeout=300 --delete --delete-excluded --exclude-from=rsync_excl"
 DRY_RUN = ""
 FORCE = False
 HOME = os.environ['HOME']
@@ -66,6 +67,7 @@ def createNextBackupFolder(datedir, backupdir):
         log("Problems creating new backup dir %s" % DATEDIR)
         return False
     
+    log("Creating Next Backup Folder %s" % (datedir))
     for root, dirs, files in os.walk('LATEST/', topdown=False, followlinks=False):
         dstpath = os.path.join(backupdir, datedir, root[7:])
         p=''
@@ -194,7 +196,8 @@ def doBackup():
     return (c == len(sources))
 
 
-def tidyup(datefile, datedir):
+def updateLatest(datefile, datedir):
+    """update the .date file and LATEST symlink"""
     log("Backup was successful.")
     open(datefile,'w').write(time.strftime("%d-%m-%Y"))
 
@@ -202,7 +205,48 @@ def tidyup(datefile, datedir):
     if os.path.exists('LATEST') and os.path.islink('LATEST'):
         os.unlink('LATEST')
 
+    log("LATEST backup is now %s" % (datedir))
     os.symlink(datedir, 'LATEST')
+
+
+def tidyup(datedir):
+    """remove the unfinished latest datedir"""
+    def remove_readonly(func, path, excinfo):
+        """onerror func to fix problems when using rmtree"""
+        parent = os.path.dirname(path)
+        mode = os.stat(path).st_mode
+        os.chmod(parent, mode | stat.S_IWRITE)
+        os.chmod(path, mode | stat.S_IWRITE)
+        func(path)
+
+    shutil.rmtree(datedir, onerror=remove_readonly)
+
+
+def fs_size(path):
+    """get the file system usage"""
+    vfs = os.statvfs(path)
+
+    size = vfs.f_frsize*vfs.f_blocks/1024
+    free = vfs.f_frsize*vfs.f_bavail/1024
+    used = ((vfs.f_frsize*vfs.f_blocks)-(vfs.f_frsize*vfs.f_bavail))/1024
+    return size,free,used
+
+
+def enough_space(backupdir, datedir):
+    """"""
+    size,free,used = fs_size(os.path.join(backupdir, datedir))
+    return (used*1.0/size*100.0) < 90.0
+
+
+def remove_oldest_backup(backupdir):
+    """"""
+    from glob import glob
+    os.chdir(backupdir)
+    backups = glob("201*-*")
+    backups.sort()
+    log("Removing oldest backup %s to free up more space" % (backups[0]))
+    tidyup(backups[0])
+
 
 
 # ------------------------------------------------------------------------------
@@ -220,6 +264,9 @@ DATEFILE = os.path.join(config['backupdir'],'.date')
 BACKUPDIR = config['backupdir']
 LOGFILE = os.path.join(BACKUPDIR, LOGFILE)
 HOST_WIFI = config['host_wifi']
+
+while not enough_space(BACKUPDIR, DATEDIR):
+    remove_old_backup(BACKUPDIR)
 
 if not createRootBackupDir(BACKUPDIR):
     sys.exit(1)
@@ -246,5 +293,8 @@ if not createNextBackupFolder(DATEDIR, BACKUPDIR):
 
 # do the actual backup
 if doBackup():
-    tidyup(DATEFILE, DATEDIR)
+    updateLatest(DATEFILE, DATEDIR)
+else:
+    log("Removing unfinished backup %s" % (DATEDIR))
+    tidyup()
 
