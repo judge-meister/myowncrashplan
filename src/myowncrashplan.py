@@ -135,12 +135,13 @@ def hostIsUp(host_wifi):
     return ret
 
 
-def backupAlreadyRunning():
+def backupAlreadyRunning(pid):
     """is the backup already running"""
     ret = False
-    st, out = unix("pidof rsync")
+    pidof = "ps -eo pid,command |awk '{$1=$1};1' | grep 'python /usr/local/bin/myowncrashplan' | grep -v grep | cut -d' ' -f1 | grep -v %d" % pid
+    st, out = unix(pidof)
     if out != "":
-        log("Backup already running.")
+        log("Backup already running. [pid %s]" % (out))
         ret = True
     return ret
 
@@ -187,7 +188,11 @@ def doBackup():
             print "CALL rsync -av %s %s \"%s:%s\" %s" % (DRY_RUN, RSYNC_OPTS, HOST_WIFI, SRC, DATEDIR)
         st, out = unix("rsync -av %s %s \"%s:%s\" %s" % (DRY_RUN, RSYNC_OPTS, HOST_WIFI, SRC, DATEDIR))
 
+        log("doBackup - status = [%d] %s" % (st, out))
         if st == 0:
+            # record that a backup has been performed today
+            c = c+1
+        elif st == 24: # ignore files vanished warning
             # record that a backup has been performed today
             c = c+1
         else:
@@ -213,6 +218,7 @@ def tidyup(datedir):
     """remove the unfinished latest datedir"""
     def remove_readonly(func, path, excinfo):
         """onerror func to fix problems when using rmtree"""
+        log("remove_readonly - %s" % path)
         parent = os.path.dirname(path)
         mode = os.stat(path).st_mode
         os.chmod(parent, mode | stat.S_IWRITE)
@@ -264,8 +270,12 @@ DATEFILE = os.path.join(config['backupdir'],'.date')
 BACKUPDIR = config['backupdir']
 LOGFILE = os.path.join(BACKUPDIR, LOGFILE)
 HOST_WIFI = config['host_wifi']
+PID=os.getpid()
 
-while not enough_space(BACKUPDIR, DATEDIR):
+# create next backup folder
+DATEDIR = time.strftime("%Y-%m-%d-%H%M%S")
+
+while not enough_space(BACKUPDIR, "LATEST"):
     remove_old_backup(BACKUPDIR)
 
 if not createRootBackupDir(BACKUPDIR):
@@ -276,7 +286,7 @@ os.chdir(BACKUPDIR)
 if not hostIsUp(HOST_WIFI):
     sys.exit(1)
 
-if backupAlreadyRunning():
+if backupAlreadyRunning(PID):
     sys.exit(1)
 
 if weHaveAlreadyRunBackupToday(DATEFILE, FORCE):
@@ -284,9 +294,6 @@ if weHaveAlreadyRunBackupToday(DATEFILE, FORCE):
     
 # assume source laptop is online as we got here
 os.chdir(BACKUPDIR)
-
-# create next backup folder
-DATEDIR = time.strftime("%Y-%m-%d-%H%M%S")
 
 if not createNextBackupFolder(DATEDIR, BACKUPDIR):
     sys.exit(1)
@@ -296,5 +303,7 @@ if doBackup():
     updateLatest(DATEFILE, DATEDIR)
 else:
     log("Removing unfinished backup %s" % (DATEDIR))
-    tidyup()
+    tidyup(DATEDIR)
+
+log("myowncrashplan Backup attempt completed.")
 
