@@ -8,7 +8,7 @@ import shutil
 import ConfigParser
 from commands import getstatusoutput as unix
 
-RSYNC_OPTS = "--log-file=myowncrashplan.log --quiet --bwlimit=5000 --timeout=300 --delete --delete-excluded --exclude-from=rsync_excl"
+RSYNC_OPTS = "--log-file=myowncrashplan.log --quiet --bwlimit=2500 --timeout=300 --delete --delete-excluded --exclude-from=rsync_excl"
 DRY_RUN = ""
 FORCE = False
 HOME = os.environ['HOME']
@@ -192,7 +192,8 @@ def doBackup():
         if st == 0:
             # record that a backup has been performed today
             c = c+1
-        elif st == 24: # ignore files vanished warning
+        elif st == 24 or st == 6144 or out.find("some files vanished") > -1: 
+            # ignore files vanished warning
             # record that a backup has been performed today
             c = c+1
         else:
@@ -221,8 +222,8 @@ def tidyup(datedir):
         log("remove_readonly - %s" % path)
         parent = os.path.dirname(path)
         mode = os.stat(path).st_mode
-        os.chmod(parent, mode | stat.S_IWRITE)
-        os.chmod(path, mode | stat.S_IWRITE)
+        os.chmod(parent, mode | stat.S_IRWXU)
+        os.chmod(path, mode | stat.S_IRWXU)
         func(path)
 
     shutil.rmtree(datedir, onerror=remove_readonly)
