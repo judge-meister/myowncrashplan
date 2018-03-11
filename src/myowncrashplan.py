@@ -277,7 +277,7 @@ PID=os.getpid()
 DATEDIR = time.strftime("%Y-%m-%d-%H%M%S")
 
 while not enough_space(BACKUPDIR, "LATEST"):
-    remove_old_backup(BACKUPDIR)
+    remove_oldest_backup(BACKUPDIR)
 
 if not createRootBackupDir(BACKUPDIR):
     sys.exit(1)
