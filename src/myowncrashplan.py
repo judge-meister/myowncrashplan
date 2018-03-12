@@ -242,7 +242,7 @@ def fs_size(path):
 def enough_space(backupdir, datedir):
     """"""
     size,free,used = fs_size(os.path.join(backupdir, datedir))
-    return (used*1.0/size*100.0) < 90.0
+    return (used*1.0/size*100.0) < 95.0
 
 
 def remove_oldest_backup(backupdir):
