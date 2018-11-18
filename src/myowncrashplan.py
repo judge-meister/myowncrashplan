@@ -74,7 +74,14 @@ class Status(object):
 
     def backingup(self):
         """create backingup file"""
+        _removeFile(os.path.join(self.dirname, self.PREPARING))
         _createFile(os.path.join(self.dirname, self.BACKINGUP))
+
+    def clear(self):
+        """remove all status files"""
+        _removeFile(os.path.join(self.dirname, self.RUNNING))
+        _removeFile(os.path.join(self.dirname, self.PREPARING))
+        _removeFile(os.path.join(self.dirname, self.BACKINGUP))
 
 
 def log(msg):
@@ -225,23 +232,6 @@ def weHaveAlreadyRunBackupToday(datefile, force):
     return ret
 
 
-def updateLatest(datefile, datedir):
-    """update the .date file and LATEST symlink after successful Backup"""
-    log("Backup was successful.")
-    open(datefile, 'w').write(time.strftime("%d-%m-%Y"))
-
-    # create new symlink to latest date dir
-    if os.path.exists('LATEST') and os.path.islink('LATEST'):
-        os.unlink('LATEST')
-
-    log("LATEST backup is now %s" % (datedir))
-    os.symlink(datedir, 'LATEST')
-
-    # remove symlink to working dir as backup finished
-    if os.path.exists('WORKING') and os.path.islink('WORKING'):
-        os.unlink('WORKING')
-
-
 def fs_size(path):
     """get the file system usage"""
     vfs = os.statvfs(path)
@@ -256,9 +246,6 @@ def enough_space(backupdir, datedir):
     """is there enough space"""
     size, _free, used = fs_size(os.path.join(backupdir, datedir))
     return (used*1.0/size*100.0) < MAX_USED_SPACE_PERC
-
-
-
 
 
 
@@ -285,6 +272,7 @@ class CrashPlan(object):
         self.status = Status(self.BACKUPDIR)
         self.status.started()
         self.backupSuccessful = False
+        self.using_workingdir = False
         
         # create next backup folder
         self.DATEDIR = time.strftime("%Y-%m-%d-%H%M%S")
@@ -353,12 +341,14 @@ class CrashPlan(object):
 
         os.chdir(self.BACKUPDIR)
     
-        self.status.finished()
+        #self.status.finished()
 
     def doBackup(self):
         """do the backup using rsync"""
         os.chdir(self.BACKUPDIR)
         self.status.backingup()
+        if not os.path.exists("/zdata/myowncrashplan/.backingup"):
+            log("ERROR - %s/.backingup wasn't created" % self.BACKUPDIR)
         c = 0
         try:
             for index in self.sources.keys():
@@ -376,12 +366,14 @@ class CrashPlan(object):
                 # use LATEST as the link-dest
                 cmd += " --link-dest=../LATEST %s " % (RSYNC_OPTS)
                     
-                if os.path.exists("WORKING") and os.path.islink("WORKING"):
+                if os.path.islink("WORKING"):
                     # use WORKING as the destination
                     destination = "WORKING"
+                    self.using_workingdir = True
                 else:
                     destination = self.DATEDIR
                     os.symlink(self.DATEDIR, "WORKING")
+                    self.using_workingdir = False
 
                 cmd += "\"%s:%s\" %s" % (self.HOST_WIFI, SRC, destination)
 
@@ -412,17 +404,32 @@ class CrashPlan(object):
     def finishUp(self):
         """tidy up after the backup"""
         if self.backupSuccessful:
-            updateLatest(self.DATEFILE, self.DATEDIR)
-        #else:
-        #    log("Removing unfinished backup %s" % (self.DATEDIR))
-        #    try:
-        #        self._tidyup(self.DATEDIR)
-        #    except OSError:
-        #        if self.DRY_RUN:
-        #            print "Just a dry run, no folder to delete"
+            self.updateLatest()
 
         log("myowncrashplan Backup attempt completed.")
         self.status.stopped()
+
+
+    def updateLatest(self):
+        """update the .date file and LATEST symlink after successful Backup"""
+        log("Backup was successful.")
+        open(self.DATEFILE, 'w').write(time.strftime("%d-%m-%Y"))
+
+        # create new symlink to latest date dir
+        if os.path.exists('LATEST') and os.path.islink('LATEST'):
+            os.unlink('LATEST')
+
+        if self.using_workingdir:
+            # change working dir date to now
+            os.rename(os.path.basename(os.path.realpath('WORKING')), self.DATEDIR)
+        
+        log("LATEST backup is now %s" % (self.DATEDIR))
+        os.symlink(self.DATEDIR, 'LATEST')
+
+        # remove symlink to working dir as backup finished
+        if os.path.exists('WORKING') and os.path.islink('WORKING'):
+            os.unlink('WORKING')
+
 
 def Usage():
     """some usage"""
@@ -465,20 +472,23 @@ def get_opts(argv):
             if o in ('-f', '--force'):
                 FORCE = True
 
-get_opts(sys.argv[1:])
-#print DRY_RUN, FORCE
+if __name__ == '__main__':
+    
+    get_opts(sys.argv[1:])
+    #print DRY_RUN, FORCE
 
-mycrashplan = CrashPlan(CONFIGFILE, FORCE, DRY_RUN)
+    mycrashplan = CrashPlan(CONFIGFILE, FORCE, DRY_RUN)
 
-try:
-    mycrashplan.canWeStart()
-    mycrashplan.prepare()
-except CrashPlanError, exc:
-    print "CrashPlanError - ", exc.value
-    mycrashplan.status.finished()
-    mycrashplan.status.stopped()
-    sys.exit()
+    try:
+        mycrashplan.canWeStart()
+        mycrashplan.prepare()
+    except CrashPlanError as exc:
+        print "CrashPlanError - ", exc.value
+        log("CrashPlanError - %s" %  (exc.value))
+        mycrashplan.status.finished()
+        mycrashplan.status.stopped()
+        sys.exit()
 
-mycrashplan.doBackup()
-mycrashplan.finishUp()
+    mycrashplan.doBackup()
+    mycrashplan.finishUp()
 

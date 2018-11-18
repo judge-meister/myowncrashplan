@@ -12,10 +12,12 @@ from commands import getstatusoutput as unix
 cmds = {
     "running" : "ssh skynet 2>/dev/null ls /zdata/myowncrashplan/.running",
     "backingup" : "ssh skynet 2>/dev/null ls /zdata/myowncrashplan/.backingup",
+    "preparing" : "ssh skynet 2>/dev/null ls /zdata/myowncrashplan/.preparing",
     "latest" : "ssh skynet 2>/dev/null ls -l /zdata/myowncrashplan/LATEST"
 }
 
 Running = False
+Preparing = False
 BackingUp = False
 ServerPresent = False
 
@@ -38,6 +40,9 @@ for o,a in opt:
     
         if unix(cmds["backingup"])[0] == 0:
             BackingUp = True
+            
+        if unix(cmds["preparing"])[0] == 0:
+            Preparing = True
     
         status, output = unix(cmds["latest"])
         #print status, output
@@ -54,8 +59,10 @@ for o,a in opt:
         if not ServerPresent:
             print "Server Off-line ]"
         else:
-            if Running and BackingUp:
+            if BackingUp:
                 print "Backing Up ]"
+            elif Preparing:
+                print "Preparing ]"
             elif Running:
                 print "Running ]"
             else:
