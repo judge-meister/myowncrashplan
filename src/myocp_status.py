@@ -1,4 +1,4 @@
-#!/usr/bin/env python
+#!/usr/bin/env python3
 
 """
 print status of myowncrashplan backup
@@ -7,7 +7,7 @@ print status of myowncrashplan backup
 import sys
 import time
 import getopt
-from commands import getstatusoutput as unix
+from subprocess import getstatusoutput as unix
 
 cmds = {
     "running" : "ssh skynet 2>/dev/null ls /zdata/myowncrashplan/.running",
@@ -21,20 +21,34 @@ Preparing = False
 BackingUp = False
 ServerPresent = False
 
+def hostisup():
+    s, o = unix('ping -c1 -t1 -q skynet 2>dev/null 1>&2')
+    if s != 0:
+        return False
+    return True
+
 try:
-    opt, args = getopt.getopt(sys.argv[1:], "nd", ["names","dryrun"])
-except getopt.error, v:
-    print v
+    opt, args = getopt.getopt(sys.argv[1:], "ndh", ["names","data","help"])
+except getopt.error as v:
+    print(v)
     sys.exit()
     
 for o,a in opt:
+    if o == "-h":
+        print("myocp_status.py -n -d")
+        sys.exit()
     if o == "-n": # show names
-        print "[ Crash Plan Status :"
+        print("[ Crash Plan Status :")
         #print "[ Status :",
-        print "[ Latest Backup :"
+        print("[ Latest Backup :")
         sys.exit()
     if o == "-d": # show data
 
+        if not hostisup():
+            print("Unavaiable ]")
+            print("Unavaiable ]")
+            sys.exit()
+            
         if unix(cmds["running"])[0] == 0:
             Running = True
     
@@ -57,17 +71,17 @@ for o,a in opt:
             datestr_out = time.strftime("%d/%m/%y",latest_time)
 
         if not ServerPresent:
-            print "Server Off-line ]"
+            print("Server Off-line ]")
         else:
             if BackingUp:
-                print "Backing Up ]"
+                print("Backing Up ]")
             elif Preparing:
-                print "Preparing ]"
+                print("Preparing ]")
             elif Running:
-                print "Running ]"
+                print("Running ]")
             else:
-                print "Idle ]"
+                print("Idle ]")
     
             if latest_time < time.localtime():
-                print "%s ]" % (datestr_out)
+                print("%s ]" % (datestr_out))
         sys.exit()
