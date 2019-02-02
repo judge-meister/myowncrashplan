@@ -163,6 +163,7 @@ Temporary Items
 .DS_Store
 ._*
 .Trashes
+.Trash
 .fseventsd
 .bzvol
 Saved Application State
