@@ -11,6 +11,7 @@ import time
 import shutil
 import getopt
 import ConfigParser
+from glob import glob
 from commands import getstatusoutput as unix
 
 RSYNC_OPTS = "--log-file=myowncrashplan.log --quiet --bwlimit=2500 --timeout=300 --delete "
@@ -300,7 +301,6 @@ class CrashPlan(object):
 
     def _remove_oldest_backup(self):
         """do as it says"""
-        from glob import glob
         os.chdir(self.BACKUPDIR)
         backups = glob("201*-*")
         backups.sort()
@@ -323,6 +323,14 @@ class CrashPlan(object):
         if not self.DRY_RUN:
             shutil.rmtree(datedir, onerror=remove_readonly)
 
+    def _last_remaining_backup(self):
+        """ """
+        os.chdir(self.BACKUPDIR)
+        backups = glob("201*-*")
+        if len(backups) == 1:
+            return True
+        return False
+
 
     def canWeStart(self):
         """can we start the backup"""
@@ -339,7 +347,7 @@ class CrashPlan(object):
     def prepare(self):
         """do prep steps before starting the actual backup"""
         self.status.preparing()
-        while not enough_space(self.BACKUPDIR, "LATEST") and not self.DRY_RUN:
+        while not enough_space(self.BACKUPDIR, "LATEST") and not self.DRY_RUN and not self._last_remaining_backup():
             self._remove_oldest_backup()
             
         if not createRootBackupDir(self.BACKUPDIR):
@@ -430,6 +438,8 @@ class CrashPlan(object):
         # create new symlink to latest DATEDIR
         if os.path.islink('LATEST'):
             os.unlink('LATEST')
+        else:
+            log("ERROR:(updateLatest) LATEST is not a symbolic link.")
 
         log("LATEST backup is now %s" % (self.DATEDIR))
         os.symlink(self.DATEDIR, 'LATEST')
@@ -437,6 +447,8 @@ class CrashPlan(object):
         # remove WORKING if it exists
         if os.path.islink('WORKING'):
             os.unlink('WORKING')
+        else:
+            log("ERROR:(updateLatest) WORKING is not a symbolic link")
 
 
     def updateWorking(self):
@@ -447,6 +459,8 @@ class CrashPlan(object):
         
         if os.path.islink('WORKING'):
             os.unlink('WORKING')
+        else:
+            log("ERROR:(updateWorking) WORKING is not a symbolic link.")
 
         # create new symlink to latest date dir
         log("WORKING folder is now %s" % (latest))
@@ -468,8 +482,8 @@ def get_opts(argv):
     """parse the command line"""
     global FORCE, DRY_RUN, DRY_RUN_STR
 
-    sopt = 'hnf'
-    lopt = ['help', 'dry_run', 'force']
+    sopt = 'hnft'
+    lopt = ['help', 'dry_run', 'force', 'test']
     
     #print argv
     try:
@@ -493,6 +507,16 @@ def get_opts(argv):
                 
             if o in ('-f', '--force'):
                 FORCE = True
+
+            if o in ('-t', '--test'):
+                # do a test
+                mcp = CrashPlan(CONFIGFILE, FORCE, DRY_RUN)
+                print "TEST1"
+                print "Percent Space of LATEST (symlink to existing folder)", percent_space(mcp.BACKUPDIR, 'LATEST')
+                os.system('df -h | grep myowncrashplan')
+                print "TEST2"
+                print "Percent Space of LATEST2 (non-existing file or folder)", percent_space(mcp.BACKUPDIR, 'LATEST2')
+                sys.exit()
 
 if __name__ == '__main__':
     
@@ -522,5 +546,12 @@ if successful backup
     
 if unsuccessful backup
     create WORKING link to LATEST folder
-    
+
+PROBLEMS
+1. Hard coded year filter of 201* will stop working next year
+2. There is a bug that deletes the last remaining backup if it uses >90% of available space
+  a. added an untesting extra test for last remaining
+  b. need to decide what to do if this situation really occurs
+
 """
+
