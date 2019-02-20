@@ -1,7 +1,7 @@
 #!/usr/bin/env python
 
 """
-mycrashplan.py - backup script
+myowncrashplan.py - backup script
 """
 
 import os
