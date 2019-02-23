@@ -75,7 +75,7 @@ from glob import glob
 from subprocess import getstatusoutput as unix
 
 LOGFILE = "myowncrashplan.log"
-CONFIG_FILE = "settings.json"
+CONFIG_FILE = os.path.join(os.environ['HOME'],".myocp","settings.json")
 
 class CrashPlanError(Exception):
     """crash plan error"""
@@ -120,6 +120,24 @@ class Log(object):
 #     "mount-source": "/zdata/myowncrashplan",  or "/dev/usb1",
 #     "use-mounted-partition": true,
 #
+default_settings_json = """
+{
+    "server-name": "",
+    "server-address": "",
+    "backup-destination": "",
+    "backup-destination-uses-hostname": true, 
+    "backup-sources-extra": "",
+    "logfilename": "myowncrashplan.log",
+    "rsync-options-exclude": "--delete --delete-excluded ",
+    "rsync-exclude-file": "myocp_excl",
+    "rsync-options": "--log-file=myowncrashplan.log --quiet --bwlimit=2500 --timeout=300 ",
+    "rsync-excludes-hidden": ".AppleDB,.AppleDesktop,.AppleDouble,:2e*,.DS_Store,._*,.Trashes,.Trash,.fseventsd,.bzvol,.cocoapods",
+    "rsync-excludes-folders": "lost+found,Network Trash Folder,Temporary Items,Saved Application State,Library,Parallels,VirtualBoxVMs,VirtualBox VMs",
+    "myocp-debug": false,
+    "myocp-tmp-dir": ".myocp",
+    "maximum-used-percent" : 90
+}
+"""
 settings_json = """
 {
     "server-name": "skynet",
@@ -133,15 +151,15 @@ settings_json = """
     "rsync-options": "--log-file=myowncrashplan.log --quiet --bwlimit=2500 --timeout=300 ",
     "rsync-excludes-hidden": ".AppleDB,.AppleDesktop,.AppleDouble,:2e*,.DS_Store,._*,.Trashes,.Trash,.fseventsd,.bzvol,.cocoapods",
     "rsync-excludes-folders": "lost+found,Network Trash Folder,Temporary Items,Saved Application State,Library,Parallels,VirtualBoxVMs",
-    "myocp-debug": true,
+    "myocp-debug": false,
     "myocp-tmp-dir": ".myocp",
+    "maximum-used-percent" : 90,
     "local-mount-point": ".myocp/mnt",
     "remote-mount-fstype": "smb",
     "remote-mount-user": "judge",
     "remote-mount-pswd": "r0adster",
     "remote-mount-point": "/zdata",
-    "remote-mount-backup-dir": "myowncrashplan",
-    "maximum-used-percent" : 90
+    "remote-mount-backup-dir": "myowncrashplan"
 }
 """
 
@@ -149,12 +167,15 @@ class MetaData(object):
     """"""
     def __init__(self, json_str=None):
         """"""
+        self.log = Log(LOGFILE)
         self.expected_keys = ['latest-complete','backup-today']
         if json_str:
             self.meta = json.loads(json_str)
             for k in self.expected_keys:
                 if k not in self.meta:
-                    raise CrashPlanError("(__init__)metadata does not have all the expected keys.")
+                    #raise CrashPlanError("(__init__)metadata does not have all the expected keys.")
+                    self.log("(__init__)metadata does not have all the expected keys.")
+                    self.meta[k] = ""
         else:
             self.meta = {}
 
@@ -205,6 +226,13 @@ class Settings(object):
                 for k in self.settings:
                     print("settings[%s] : %s" % (k, self.settings[k]))
         
+    def write(self, filename):
+        """write the settins.json file"""
+        if not os.path.exists(os.path.dirname(filename)):
+            os.makedirs(os.path.dirname(filename))
+        json_str = json.dumps(self.settings, sort_keys=True, indent=4)
+        open(filename, "w").write(json_str)
+
     def verify(self):
         """verify settings are consistent"""
         # check if server name and address match each other
@@ -247,6 +275,14 @@ class Settings(object):
         else:
             self.log("rsync exclusions file does not exist.")
             
+    def set(self, key, val):
+        """"""
+        self.settings[key] = val
+        
+    def remove(self, key):
+        """"""
+        self.settings.pop(key, None)
+
     def __call__(self, key):
         if key in self.settings:
             return self.settings[key]
@@ -281,8 +317,8 @@ class RemoteComms(object):
         if st != 0:
             self.log("ERROR(remoteCommand): %s" % command)
             self.log("ERROR(remoteCommand): %d %s" % (st, rt))
-            raise CrashPlanError("ERROR: remote command failed. (%s)" % command)
-        return rt
+            #raise CrashPlanError("ERROR: remote command failed. (%s)" % command)
+        return st,rt
 
     def remoteCopy(self, filename):
         """scp file server:/path/to/dir"""
@@ -295,17 +331,18 @@ class RemoteComms(object):
 
     def remoteSpace(self):
         """get percentage space used on remote server"""
-        response = self.remoteCommand("df -h | grep %s | awk -F' ' '{print $5}'" % self.settings('backup-destination'))
+        st, response = self.remoteCommand("df -h | grep %s | awk -F' ' '{print $5}'" % self.settings('backup-destination'))
         #print(response)
         return int(response.replace('%',''))
     
     def createRootBackupDir(self):
         """ensure root backup dir exists on remote server"""
-        return self.remoteCommand("mkdir -p %s" % self.settings("backup-destination"))
+        st, rt = self.remoteCommand("mkdir -p %s" % os.path.join(self.settings("backup-destination"),self.settings('local-hostname')))
+        return rt
 
     def getBackupList(self):
         """"""
-        response = self.remoteCommand("ls -d %s/%s/20*" % (self.settings("backup-destination"),self.settings('local-hostname')))
+        st, response = self.remoteCommand("ls -d %s/%s/20*" % (self.settings("backup-destination"),self.settings('local-hostname')))
         bu_list = response.split('\n')
         bu_list.sort()
         return bu_list
@@ -318,7 +355,11 @@ class RemoteComms(object):
     def readMetaData(self):
         """"""
         cmd = "cat %s/.metadata" % os.path.join(self.settings('backup-destination'),self.settings('local-hostname'))
-        return self.remoteCommand(cmd)
+        st,rt = self.remoteCommand(cmd)
+        if st != 0:
+            if rt.find('No such file or') > -1:
+                return "{}"
+        return rt
         
     def writeMetaData(self, meta):
         """"""
@@ -385,7 +426,8 @@ class CrashPlan(object):
         if self.DRY_RUN:
             cmd += " --dry-run"
         # use LATEST as the link-dest
-        cmd += " --link-dest=../%s" % (self.meta.get('latest-complete'))
+        if self.meta.get('latest-complete') != "":
+            cmd += " --link-dest=../%s" % (self.meta.get('latest-complete'))
         cmd += " "+self.settings('rsync-options-exclude')
         cmd += " "+self.settings('rsync-options')
         cmd += " "+self.settings('rsync-exclude-file-option')
@@ -397,7 +439,9 @@ class CrashPlan(object):
         """
         self.settings.create_excl_file()
         sources = [os.environ['HOME']]
-        sources += self.settings("backup-sources-extra").split(',')
+        for extra in self.settings("backup-sources-extra").split(','):
+            if extra != '' and os.path.exists(extra):
+                sources += extra
         try:
             c=0
             for src in sources:
@@ -407,6 +451,8 @@ class CrashPlan(object):
             self.log("Backup of %s was interrupted by user intevention" % src)
 
         self.backupSuccessful = (c == len(sources) and not self.DRY_RUN)
+        print ("Backup successful? ",self.backupSuccessful, "len(sources) = ", len(sources))
+        print ("sources: ",sources)
         #self.status.finished()
         self.settings.remove_excl_file()
 
@@ -426,23 +472,26 @@ class CrashPlan(object):
         print("CALL %s" % cmd) 
         st, out = unix(cmd)
 
-        result = self.examinationOfResults(st, out)
+        result = self.interpretResults(st, out)
         self.log("Backup of %s was %ssuccessful\n" % (src, '' if result == True else 'not '))
         return result
 
-    def examinationOfResults(self, st, out):
+    def interpretResults(self, st, out):
         """return true if status returned is 0 or a known set of non-zero values"""
         self.log("doBackup - status = [%d] %s" % (st, out))
         if st == 0:
             # record that a backup has been performed today
-            return True #c = c+1
+            return True 
         elif st == 24 or st == 6144 or out.find("some files vanished") > -1: 
             # ignore files vanished warning
             # record that a backup has been performed today
-            #c = c+1
-            #self.log("Backup of %s was successful" % src)
+            self.log("Some files vanished (code 24 or 6144) - Filesystem changed after backup started.")
             return True
-        #self.log("Backup of %s was not successful\n" % src)
+        elif st == 23: # some files could not be transferred - permission denied at source
+            # ignore this error, files probably not owned by current user
+            # record that a backup has been performed today
+            self.log("Some files could not be transferred (code 23) - look for files/folders you cannot read.")
+            return True
         return False
 
     def finishUp(self):
@@ -460,163 +509,6 @@ class CrashPlan(object):
             except CrashPlanError as exc:
                 print(exc)
 
-
-class Testing(object):
-    def __init__(self):
-        self.setup()
-        self.test02()
-        self.test03()
-        self.test04()
-        self.test05()
-        self.test01()
-        
-
-    def setup(self):
-        self.settings = Settings(settings_json)
-        self.comms = RemoteComms(self.settings)
-        
-    def test01(self):
-        print("\nTEST 01")
-        print("Testing CrashPlan")
-        dry_run = True
-        try:
-            CP = CrashPlan(self.settings, self.comms, dry_run)
-        except CrashPlanError as exc:
-            print(exc)
-            #CP.meta = MetaData()
-            #CP.meta.set('backup-today', '2019-02-20')
-            #CP.meta.set('latest-complete', '2019-02-20-230000')
-            
-        print(CP.rsyncCmd())
-        CP.backupSuccessful = False
-        CP.finishUp()
-        CP.backupSuccessful = True
-        CP.finishUp()
-        
-    def test02(self):
-        # TEST MetaData class and remote reading and writing
-        print("\nTEST 02")
-        print("Testing MetaData")
-        print("Read Remote .metadata")
-        json_str=""
-        try:
-            json_str = self.comms.readMetaData()
-        except CrashPlanError as exc:
-            print(exc)
-        print(json_str)
-        print("Create new instance of MetaData class")
-        metadata = MetaData(json_str)
-        try:
-            print("%s = %s" % ('latest-complete', metadata.get('latest-complete')))
-        except CrashPlanError as exc:
-            print(exc)
-        meta1=MetaData()
-        meta1.set('backup-today', '2019-02-20')
-        meta1.set('latest-complete', '2019-02-20-230000')
-        print("Create new instance of MetaData class")
-        js2 = repr(meta1)
-        meta2 = MetaData(js2)
-        print(meta2.get('backup-today'))
-        print("Writing .metadata Remotely")
-        try:
-            self.comms.writeMetaData(repr(meta2))
-        except CrashPlanError as exc:
-            print(exc)
-        try:
-            rt = self.comms.remoteCommand("ls -la %s" % (os.path.join(self.settings('backup-destination'),self.settings('local-hostname'))))
-            print(rt)
-        except CrashPlanError as exc:
-            print(exc)
-        print("Invalid .metadata")
-        try:
-            meta3 = MetaData('{"test-key": "invalid"}')
-        except CrashPlanError as exc:
-            print(exc)
-        try:
-            meta2.get("test-key")
-        except CrashPlanError as exc:
-            print(exc)
-        try:
-            meta2.set("test-key", "21")
-        except CrashPlanError as exc:
-            print(exc)
-        
-    def test03(self):
-        print("\nTEST 03")
-        print("Testing Settings")
-        print("Server is up %s" % self.comms.serverIsUp())
-        js="""{"server-name": "skynet", "server-address": "192.168.0.77","myocp-debug": true, 
-               "rsync-excludes-hidden": "", "rsync-excludes-folders": "", "myocp-tmp-dir": "",
-               "rsync-exclude-file": "" }"""
-        try:
-            set2=Settings(js)
-        except CrashPlanError as exc:
-            print(exc)
-        js="""{"server-name": "skynet", "server-address": "","myocp-debug": true, 
-               "rsync-excludes-hidden": "", "rsync-excludes-folders": "", "myocp-tmp-dir": "",
-               "rsync-exclude-file": "" }"""
-        set2=Settings(js)
-        com2=RemoteComms(set2)
-        print("Server is up %s" % com2.serverIsUp())
-        print("rsync-exclude-file = ",self.settings("rsync-exclude-file"))
-        self.settings.create_excl_file()
-        print(open(self.settings("rsync-exclude-file"), 'r').read())
-        self.settings.remove_excl_file()
-        self.settings.remove_excl_file()
-        try:
-            self.settings('Test-key')
-        except CrashPlanError as exc:
-            print(exc)
-        js2="""{"test-key": "2" "test-key-2": True }"""
-        try:
-            set3=Settings(js2)
-        except CrashPlanError as exc:
-            print(exc)
-        open("./temp.json", "w").write(js)
-        set4=Settings("./temp.json")
-        os.unlink("./temp.json")
-
-    def test04(self):
-        print("\nTEST 04")
-        print("Testing RemoteComms")
-        try:
-            print(self.comms.remoteSpace())
-        except (CrashPlanError, ValueError) as exc:
-            print(exc)
-        try:
-            print(self.comms.getBackupList())
-        except CrashPlanError as exc:
-            print(exc)
-        try:
-            self.comms.removeOldestBackup("oldest")
-        except CrashPlanError as exc:
-            print(exc)
-        try:
-            print("CreateRootBackup()q",self.comms.createRootBackupDir())
-        except CrashPlanError as exc:
-            print(exc)
-        try:
-            self.comms.remoteCommand("hello")
-        except CrashPlanError as exc:
-            print(exc)
-        try:
-            self.comms.remoteCopy("hello")
-        except CrashPlanError as exc:
-            print(exc)
-        js="""{"server-name": "sky", "server-address": "192.168.0.77","myocp-debug": true, 
-               "rsync-excludes-hidden": "", "rsync-excludes-folders": "", "myocp-tmp-dir": "",
-               "rsync-exclude-file": "" }"""
-        set2=Settings(js)
-        com2=RemoteComms(set2)
-        print("Server is up %s" % com2.serverIsUp())
-
-    def test05(self):
-        print("\nTEST 05")
-        print("Testing MountCommand")
-        mnt=MountCommand(self.settings)
-        mnt.mount()
-        mnt.umount()
-        
 
 
 # ------------------------------------------------------------------------------
@@ -679,12 +571,47 @@ def weHaveBackedUpToday(comms):
         return True
     return False
 
+def initialise():
+    """initialise the settings file"""
+    # server-name
+    # backup-destination
+    # backup-sources-extra
+    if not os.path.exists(CONFIG_FILE):
+        settings = Settings(default_settings_json)
+        print("Crash Plan settings file missing.")
+        yes = "n"
+        while yes[0].lower() != "y":
+            srvname = input("\nPlease enter the hostname of the backup server/NAS: ")
+            try:
+                srvaddr = socket.gethostbyname(srvname)
+                print(srvaddr)
+                yes = "y"
+            except socket.gaierror as exc:
+                yes = input("This server name does not resolve to an ip address. Are you sure it's correct? [Y/n] ")
+        settings.set('server-name', srvname)
+        settings.set('server-address', srvaddr)
+        backuproot = "."
+        while backuproot[0] != "/":
+            backuproot = input("\nPlease enter the root directory to use as a backup location. Should start with '/': ")
+        settings.set('backup-destination', backuproot)
+        settings.remove('rsync-excludes-list')
+        yes = input("\nBy default your home directory will be backed up. Do you have any other location to be backed up? [y/N] ")
+        if yes[0].lower() == "y":
+            extras = input("Enter any extra locations as a comma seperated list: ")
+            settings.set('backup-sources-extra', extras)
+        settings.write(CONFIG_FILE)
+        print("\nTake a look at ~/.myocp/settings.json to examine the exclusions filters before starting the first backup.")
+        sys.exit()
+
 def main():
     """do all the preliminary checks before starting a backup"""
     dry_run, force = get_opts(sys.argv[1:])
-    
+
+    initialise()
+
     # instantiate some util classes
-    settings = Settings(settings_json)
+    settings = Settings(CONFIG_FILE)
+
     comms = RemoteComms(settings)
     log = Log(LOGFILE)
 
