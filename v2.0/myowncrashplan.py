@@ -74,7 +74,8 @@ import socket
 from glob import glob
 from subprocess import getstatusoutput as unix
 
-LOGFILE = "myowncrashplan.log"
+BACKUPLOG_FILE = os.path.join(os.environ['HOME'],".myocp","backup.log")
+ERRORLOG_FILE = os.path.join(os.environ['HOME'],".myocp","error.log")
 CONFIG_FILE = os.path.join(os.environ['HOME'],".myocp","settings.json")
 
 class CrashPlanError(Exception):
@@ -89,28 +90,27 @@ class CrashPlanError(Exception):
 
 class TimeDate(object):
     """Date and Time object"""
-    def __init__(self):
-        pass
-        
-    def stamp(self):
+    
+    @staticmethod
+    def stamp():
         return time.strftime("%Y/%m/%d %H:%M:%S")
         
-    def datedir(self):
+    @staticmethod
+    def datedir():
         return time.strftime("%Y-%m-%d-%H%M%S")
 
-    def today(self):
+    @staticmethod
+    def today():
         return time.strftime("%Y-%m-%d")
 
 class Log(object):
     """Logging object"""
     def __init__(self, logfile):
         self.logfile = logfile
-        self.time = TimeDate()
 
     def __call__(self, msg):
         """write to the log file"""
-        d = self.time.stamp()
-        line = "%s [%d] - %s\n" % (d, os.getpid(), msg)
+        line = "%s [%d] - %s\n" % (TimeDate.stamp(), os.getpid(), msg)
         open(self.logfile, 'a').write(line)
 
 
@@ -130,7 +130,7 @@ default_settings_json = """
     "logfilename": "myowncrashplan.log",
     "rsync-options-exclude": "--delete --delete-excluded ",
     "rsync-exclude-file": "myocp_excl",
-    "rsync-options": "--log-file=myowncrashplan.log --quiet --bwlimit=2500 --timeout=300 ",
+    "rsync-options": "--quiet --bwlimit=2500 --timeout=300 ",
     "rsync-excludes-hidden": ".AppleDB,.AppleDesktop,.AppleDouble,:2e*,.DS_Store,._*,.Trashes,.Trash,.fseventsd,.bzvol,.cocoapods",
     "rsync-excludes-folders": "lost+found,Network Trash Folder,Temporary Items,Saved Application State,Library,Parallels,VirtualBoxVMs,VirtualBox VMs",
     "myocp-debug": false,
@@ -148,7 +148,7 @@ settings_json = """
     "logfilename": "myowncrashplan.log",
     "rsync-options-exclude": "--delete --delete-excluded ",
     "rsync-exclude-file": "myocp_excl",
-    "rsync-options": "--log-file=myowncrashplan.log --quiet --bwlimit=2500 --timeout=300 ",
+    "rsync-options": "--quiet --bwlimit=2500 --timeout=300 ",
     "rsync-excludes-hidden": ".AppleDB,.AppleDesktop,.AppleDouble,:2e*,.DS_Store,._*,.Trashes,.Trash,.fseventsd,.bzvol,.cocoapods",
     "rsync-excludes-folders": "lost+found,Network Trash Folder,Temporary Items,Saved Application State,Library,Parallels,VirtualBoxVMs",
     "myocp-debug": false,
@@ -165,9 +165,10 @@ settings_json = """
 
 class MetaData(object):
     """"""
-    def __init__(self, json_str=None):
+    def __init__(self, log, json_str=None):
         """"""
-        self.log = Log(LOGFILE)
+        assert isinstance(log, Log)
+        self.log = log
         self.expected_keys = ['latest-complete','backup-today']
         if json_str:
             self.meta = json.loads(json_str)
@@ -199,10 +200,12 @@ class MetaData(object):
 
 class Settings(object):
     """Settings object"""
-    def __init__(self, path):
+    def __init__(self, path, log):
         """"""
+        assert isinstance(log, Log)
+        assert isinstance(path, str)
         self.path = path
-        self.log = Log(LOGFILE)
+        self.log = log
         self.load()
         self.verify()
         
@@ -244,7 +247,11 @@ class Settings(object):
         os.makedirs(self.settings['myocp-tmp-dir'], mode=0o755, exist_ok=True)
         self.settings['rsync-exclude-file'] = os.path.join(self.settings['myocp-tmp-dir'], self.settings['rsync-exclude-file'])
         self.settings['rsync-exclude-file-option'] = "--exclude-from=%s" % (self.settings['rsync-exclude-file'])
-
+        if self.settings["backup-sources-extra"].find(',') > -1:
+            self.settings["backup-sources-extra-list"] = self.settings["backup-sources-extra"].split(',')
+        else:
+            self.settings["backup-sources-extra-list"] = [self.settings["backup-sources-extra"]]
+            
         # check if server name and address match each other
         if self.settings['server-address'] != "":
             try:
@@ -292,9 +299,11 @@ class Settings(object):
 
 class RemoteComms(object):
     """Remote Comms object for talking to the remote server"""
-    def __init__(self, settings):
+    def __init__(self, settings, log):
+        assert isinstance(settings, Settings)
+        assert isinstance(log, Log)
         self.settings = settings
-        self.log = Log(LOGFILE)
+        self.log = log
         
     def serverIsUp(self):
         return self.hostIsUp(self.settings('server-address'))
@@ -343,9 +352,12 @@ class RemoteComms(object):
     def getBackupList(self):
         """"""
         st, response = self.remoteCommand("ls -d %s/%s/20*" % (self.settings("backup-destination"),self.settings('local-hostname')))
-        bu_list = response.split('\n')
-        bu_list.sort()
-        return bu_list
+        if st == 0:
+            bu_list = response.split('\n')
+            bu_list.sort()
+            return bu_list
+        else:
+            return []
 
     def removeOldestBackup(self, oldest):
         """ """
@@ -410,26 +422,34 @@ class MountCommand(object):
 class CrashPlan(object):
     """control class"""
 
-    def __init__(self, settings, remote_comms, dry_run):
+    def __init__(self, settings, meta, log, remote_comms, dry_run):
         """"""
+        assert isinstance(settings, Settings)
+        assert isinstance(remote_comms, RemoteComms)
+        assert isinstance(meta, MetaData)
+        assert isinstance(log, Log)
         self.DRY_RUN = dry_run
-        self.log = Log(LOGFILE)
+        self.log = log
         # call settings loader and verifier
         self.settings = settings
         self.comms = remote_comms
-        self.dt = TimeDate()
         self.local_hostname = self.settings('local-hostname')
-        self.meta = MetaData(self.comms.readMetaData())
+        self.meta = meta 
 
     def rsyncCmd(self):
         cmd = "rsync -av "
         if self.DRY_RUN:
             cmd += " --dry-run"
         # use LATEST as the link-dest
-        if self.meta.get('latest-complete') != "":
+        if self.meta.get('latest-complete') != "" and os.path.exists(self.meta.get('latest-complete')):
             cmd += " --link-dest=../%s" % (self.meta.get('latest-complete'))
+        else:
+            baklist = self.comms.getBackupList()
+            if len(baklist) > 0:
+                cmd += " --link-dest=../%s" % os.path.basename(baklist[-1])
         cmd += " "+self.settings('rsync-options-exclude')
         cmd += " "+self.settings('rsync-options')
+        cmd += " --log-file=%s" % BACKUPLOG_FILE #--log-file=myowncrashplan.log
         cmd += " "+self.settings('rsync-exclude-file-option')
         return cmd
         
@@ -439,9 +459,9 @@ class CrashPlan(object):
         """
         self.settings.create_excl_file()
         sources = [os.environ['HOME']]
-        for extra in self.settings("backup-sources-extra").split(','):
+        for extra in self.settings("backup-sources-extra-list"):
             if extra != '' and os.path.exists(extra):
-                sources += extra
+                sources.append(extra)
         try:
             c=0
             for src in sources:
@@ -497,18 +517,16 @@ class CrashPlan(object):
     def finishUp(self):
         """write .metadata file"""
         if self.backupSuccessful:
-            now = self.dt.datedir()
-            meta2 = MetaData()
-            meta2.set("latest-complete", now)
-            meta2.set("backup-today", self.dt.today())
+            meta2 = MetaData(self.log)
+            meta2.set("latest-complete", TimeDate.datedir())
+            meta2.set("backup-today", TimeDate.today())
             try:
                 self.comms.writeMetaData(repr(meta2))
-                src = os.path.join(self.settings('backup-destination'),self.settings('local-hostname'),"WORKING")
-                dest = os.path.join(self.settings('backup-destination'),self.settings('local-hostname'),now)
+                src = os.path.join(self.settings('backup-destination'), self.settings('local-hostname'), "WORKING")
+                dest = os.path.join(self.settings('backup-destination'), self.settings('local-hostname'), TimeDate.datedir())
                 self.comms.remoteCommand("mv %s %s" % (src, dest))
             except CrashPlanError as exc:
                 print(exc)
-
 
 
 # ------------------------------------------------------------------------------
@@ -563,21 +581,23 @@ def backupAlreadyRunning():
         return True
     return False
 
-def weHaveBackedUpToday(comms):
+def weHaveBackedUpToday(comms, log):
     """this relies on remote metadata, which could be stored locally also"""
-    meta = MetaData(comms.readMetaData())
-    dt = TimeDate()
-    if meta.get('backup-today') == dt.today:
+    assert isinstance(comms, RemoteComms)
+    assert isinstance(log, Log)
+    meta = MetaData(log, comms.readMetaData())
+    if meta.get('backup-today') == TimeDate.today():
         return True
     return False
 
-def initialise():
+def initialise(errlog):
     """initialise the settings file"""
     # server-name
     # backup-destination
     # backup-sources-extra
+    assert isinstance(errlog, Log)
     if not os.path.exists(CONFIG_FILE):
-        settings = Settings(default_settings_json)
+        settings = Settings(default_settings_json, errlog)
         print("Crash Plan settings file missing.")
         yes = "n"
         while yes[0].lower() != "y":
@@ -595,6 +615,7 @@ def initialise():
             backuproot = input("\nPlease enter the root directory to use as a backup location. Should start with '/': ")
         settings.set('backup-destination', backuproot)
         settings.remove('rsync-excludes-list')
+        settings.remove('backup-sources-extra-list')
         yes = input("\nBy default your home directory will be backed up. Do you have any other location to be backed up? [y/N] ")
         if yes[0].lower() == "y":
             extras = input("Enter any extra locations as a comma seperated list: ")
@@ -603,35 +624,42 @@ def initialise():
         print("\nTake a look at ~/.myocp/settings.json to examine the exclusions filters before starting the first backup.")
         sys.exit()
 
+def rotateLog(logfile):
+    """"""
+    print("rotateLog(%s)" % logfile)
+    
+
 def main():
     """do all the preliminary checks before starting a backup"""
     dry_run, force = get_opts(sys.argv[1:])
 
-    initialise()
+    baklog = Log(BACKUPLOG_FILE)
+    errlog = Log(ERRORLOG_FILE)
+    
+    initialise(errlog)
 
     # instantiate some util classes
-    settings = Settings(CONFIG_FILE)
-
-    comms = RemoteComms(settings)
-    log = Log(LOGFILE)
-
+    settings = Settings(CONFIG_FILE, errlog)
+    comms = RemoteComms(settings, errlog)
+    meta = MetaData(errlog, comms.readMetaData())
+    
     # basic tests before we start 
     if backupAlreadyRunning():
-        log("Backup already running. [pid %s], so exit here." % (out))
+        baklog("Backup already running. [pid %s], so exit here." % (out))
         sys.exit(0)
 
     # - is the server up? 
     # - have we backed up today?
     if comms.serverIsUp(): 
-        log("The Server is Up. The backup might be able to start.")
+        baklog("The Server is Up. The backup might be able to start.")
         
         comms.createRootBackupDir()
 
-        if weHaveBackedUpToday(comms) and not force:
-            log("We Have Already Backed Up Today, so exit here.")
+        if weHaveBackedUpToday(comms, errlog) and not force:
+            baklog("We Have Already Backed Up Today, so exit here.")
             sys.exit(0)
-        elif weHaveBackedUpToday(comms) and force:
-            log("We Have Already Backed Up Today, but we are running another backup anyway.")
+        elif weHaveBackedUpToday(comms, errlog) and force:
+            baklog("We Have Already Backed Up Today, but we are running another backup anyway.")
             
         # Is There Enough Space or can space be made available
         backup_list = comms.getBackupList()
@@ -643,11 +671,14 @@ def main():
             oldest = backup_list[0]
 
         if comms.remoteSpace() <= settings('maximum-used-percent'):
-            log("There is enough space for the next backup.")
+            baklog("There is enough space for the next backup.")
 
-            mcp = CrashPlan(settings, comms, dry_run)
+            mcp = CrashPlan(settings, meta, baklog, comms, dry_run)
             mcp.doBackup()
             mcp.finishUp()
+            
+    rotateLog(BACKUPLOG_FILE)
+    rotateLog(ERRORLOG_FILE)
     
 
 if __name__ == '__main__':

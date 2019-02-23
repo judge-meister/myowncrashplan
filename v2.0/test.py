@@ -2,7 +2,7 @@
 
 import unittest
 from unittest.mock import patch
-
+import os
 
 from myowncrashplan import (Log,
                             Settings,
@@ -14,6 +14,9 @@ from myowncrashplan import (Log,
 
 class Testing(object):
     def __init__(self):
+        pass
+        
+    def run(self):
         self.setup()
         self.test02()
         self.test03()
@@ -23,8 +26,9 @@ class Testing(object):
         
 
     def setup(self):
-        self.settings = Settings(settings_json)
-        self.comms = RemoteComms(self.settings)
+        self.errlog = Log("/Users/judge/.myocp/test.log")
+        self.settings = Settings("/Users/judge/.myocp/settings.json", self.errlog)
+        self.comms = RemoteComms(self.settings, self.errlog)
         
     def test01(self):
         print("\nTEST 01")
@@ -78,6 +82,17 @@ class Testing(object):
         open("./temp.json", "w").write(js)
         set4=Settings("./temp.json")
         os.unlink("./temp.json")
+
+    def test04a(self):
+        print("\nTEST 04a")
+        st, rt = self.comms.remoteCommand("ls -trd /zdata/myowncrashplan/Prometheus.local/2019-02-03*")
+        print(st, rt)
+        lst = rt.split('\n')
+        print("Basename: ",os.path.basename(lst[0]))
+        st, rt = self.comms.remoteCommand("ls -trd /zdata/myowncrashplan/Prometheus.local/3*")
+        print(st, rt)
+        if st != 0:
+            print([])
 
     def test04(self):
         print("\nTEST 04")
@@ -220,5 +235,9 @@ class TestMetaData(unittest.TestCase):
         self.assertEqual(repr(metadata), '{"backup-today": "2019-12-12", "latest-complete": "2019-01-02-012345"}\n')
 
 if __name__ == '__main__':
-    #T1 = Testing()
-    unittest.main()
+    T1 = Testing()
+    #T1.run()
+    T1.setup()
+    T1.test04a()
+    #unittest.main()
+    
