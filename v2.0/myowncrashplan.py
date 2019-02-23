@@ -111,7 +111,8 @@ class Log(object):
     def __call__(self, msg):
         """write to the log file"""
         line = "%s [%d] - %s\n" % (TimeDate.stamp(), os.getpid(), msg)
-        open(self.logfile, 'a').write(line)
+        with open(self.logfile, 'a') as fp:
+            fp.write(line)
 
 
 # Potential other options to cater for:
@@ -213,19 +214,20 @@ class Settings(object):
         """load settings file """
         try:
             if os.path.exists(self.path):
-                self.settings = json.load(open(self.path, 'r'))
+                with open(self.path, 'r') as fp:
+                    self.settings = json.load(fp)
             else:
                 # use path as a string initially
                 self.settings = json.loads(self.path)
             self.log("Settings file loaded.")
         except json.decoder.JSONDecodeError as exc:
-            print("ERROR(load_settings()): problems loading settings file (%s)" % exc)
+            #print("ERROR(load_settings()): problems loading settings file (%s)" % exc)
             self.log("ERROR(load_settings()): problems loading settings file (%s)" % exc)
             #sys.exit(1)
             raise CrashPlanError(exc)
         else:
-            if self.settings['myocp-debug']:
-                print("Settings Loaded")
+            if 'myocp-debug' in self.settings and self.settings['myocp-debug']:
+                print("Settings Loaded.")
                 for k in self.settings:
                     print("settings[%s] : %s" % (k, self.settings[k]))
         
@@ -234,41 +236,52 @@ class Settings(object):
         if not os.path.exists(os.path.dirname(filename)):
             os.makedirs(os.path.dirname(filename))
         json_str = json.dumps(self.settings, sort_keys=True, indent=4)
-        open(filename, "w").write(json_str)
+        with open(filename, "w") as fp:
+            fp.write(json_str)
 
     def verify(self):
         """verify settings are consistent"""
-        # check if server name and address match each other
-        # merge rsync-excludes-hidden and rsync-excludes-folder lists
-        self.settings['rsync-excludes-list'] = self.settings['rsync-excludes-hidden'].split(',')
-        self.settings['rsync-excludes-list'] += self.settings['rsync-excludes-folders'].split(',')
-        # merge rsync-exclude-file and rsync-exclude-file-option
-        self.settings['myocp-tmp-dir'] = os.path.join(os.environ['HOME'], self.settings['myocp-tmp-dir'])
-        os.makedirs(self.settings['myocp-tmp-dir'], mode=0o755, exist_ok=True)
-        self.settings['rsync-exclude-file'] = os.path.join(self.settings['myocp-tmp-dir'], self.settings['rsync-exclude-file'])
-        self.settings['rsync-exclude-file-option'] = "--exclude-from=%s" % (self.settings['rsync-exclude-file'])
-        if self.settings["backup-sources-extra"].find(',') > -1:
-            self.settings["backup-sources-extra-list"] = self.settings["backup-sources-extra"].split(',')
+        expected_keys = ['rsync-excludes-hidden','rsync-excludes-folders','myocp-tmp-dir',
+                         'backup-sources-extra','server-name','rsync-exclude-file']
+        keys_missing = False
+        for key in expected_keys:
+            if key not in self.settings:
+                self.log("key %s not found in settings file.")
+                keys_missing = True
+        if keys_missing:
+            self.log("Problems verifying Settings file. There are some essential settings missing.")
         else:
-            self.settings["backup-sources-extra-list"] = [self.settings["backup-sources-extra"]]
+            # check if server name and address match each other
+            # merge rsync-excludes-hidden and rsync-excludes-folder lists
+            self.settings['rsync-excludes-list'] = self.settings['rsync-excludes-hidden'].split(',')
+            self.settings['rsync-excludes-list'] += self.settings['rsync-excludes-folders'].split(',')
+            # merge rsync-exclude-file and rsync-exclude-file-option
+            self.settings['myocp-tmp-dir'] = os.path.join(os.environ['HOME'], self.settings['myocp-tmp-dir'])
+            os.makedirs(self.settings['myocp-tmp-dir'], mode=0o755, exist_ok=True)
+            self.settings['rsync-exclude-file'] = os.path.join(self.settings['myocp-tmp-dir'], self.settings['rsync-exclude-file'])
+            self.settings['rsync-exclude-file-option'] = "--exclude-from=%s" % (self.settings['rsync-exclude-file'])
+            if self.settings["backup-sources-extra"].find(',') > -1:
+                self.settings["backup-sources-extra-list"] = self.settings["backup-sources-extra"].split(',')
+            else:
+                self.settings["backup-sources-extra-list"] = [self.settings["backup-sources-extra"]]
             
-        # check if server name and address match each other
-        if self.settings['server-address'] != "":
-            try:
-                if self.settings['server-address'] != socket.gethostbyname(self.settings['server-name']):
-                    raise CrashPlanError("ERROR(Settings.verify(): Server name and Address do not match.")
-            except socket.gaierror as exc:
-                self.log(exc)
-        else:
-            self.settings['server-address'] = socket.gethostbyname(self.settings['server-name'])
+            # check if server name and address match each other
+            if 'server-address' in self.settings and self.settings['server-address'] != "":
+                try:
+                    if self.settings['server-address'] != socket.gethostbyname(self.settings['server-name']):
+                        raise CrashPlanError("ERROR(Settings.verify(): Server name and Address do not match.")
+                except socket.gaierror as exc:
+                    self.log(exc)
+            else:
+                self.settings['server-address'] = socket.gethostbyname(self.settings['server-name'])
         
-        self.settings['local-hostname'] = socket.gethostname()
-        
-        self.log("Settings file verified.")
+            self.settings['local-hostname'] = socket.gethostname()
+            self.log("Settings file verified.")
     
     def create_excl_file(self):
         """create the rsync exclusions file"""
-        open(self.settings['rsync-exclude-file'], 'w').write("\n".join(self.settings['rsync-excludes-list']))
+        with open(self.settings['rsync-exclude-file'], 'w') as fp:
+            fp.write("\n".join(self.settings['rsync-excludes-list']))
         self.log("rsync exclusions file created at %s" % self.settings['rsync-exclude-file'])
         if self.settings['myocp-debug']:
             print("create_rsync_excl() - EXCLUDES = \n%s" % self.settings['rsync-excludes-list'])
@@ -276,7 +289,7 @@ class Settings(object):
 
     def remove_excl_file(self):
         """delete the rsync exclusions file"""
-        if os.path.exists(self.settings['rsync-exclude-file']):
+        if 'rsync-exclude-file' in self.settings and os.path.exists(self.settings['rsync-exclude-file']):
             os.unlink(self.settings['rsync-exclude-file'])
             self.log("rsync exclusions file removed.")
         else:
@@ -376,7 +389,8 @@ class RemoteComms(object):
     def writeMetaData(self, meta):
         """"""
         metafile = os.path.join(os.environ['HOME'],self.settings("myocp-tmp-dir"), '.metadata')
-        open(metafile, 'w').write(meta)
+        with open(metafile, 'w') as fp:
+            fp.write(meta)
         self.remoteCopy(metafile)
         
 class MountCommand(object):

@@ -2,7 +2,8 @@
 
 import unittest
 from unittest.mock import patch
-import os
+import os, shutil
+from io import StringIO
 
 from myowncrashplan import (Log,
                             Settings,
@@ -18,16 +19,16 @@ class Testing(object):
         
     def run(self):
         self.setup()
-        self.test02()
-        self.test03()
+        #self.test02()
+        #self.test03()
         self.test04()
-        self.test05()
+        self.test04a()
         self.test01()
         
 
     def setup(self):
-        self.errlog = Log("/Users/judge/.myocp/test.log")
-        self.settings = Settings("/Users/judge/.myocp/settings.json", self.errlog)
+        self.errlog = Log(os.path.join(os.environ['HOME'],".myocp/test.log"))
+        self.settings = Settings(os.path.join(os.environ['HOME'],".myocp/settings.json"), self.errlog)
         self.comms = RemoteComms(self.settings, self.errlog)
         
     def test01(self):
@@ -48,40 +49,6 @@ class Testing(object):
         CP.backupSuccessful = True
         CP.finishUp()
         
-    def test03(self):
-        print("\nTEST 03")
-        print("Testing Settings")
-        print("Server is up %s" % self.comms.serverIsUp())
-        js="""{"server-name": "skynet", "server-address": "192.168.0.77","myocp-debug": true, 
-               "rsync-excludes-hidden": "", "rsync-excludes-folders": "", "myocp-tmp-dir": "",
-               "rsync-exclude-file": "" }"""
-        try:
-            set2=Settings(js)
-        except CrashPlanError as exc:
-            print(exc)
-        js="""{"server-name": "skynet", "server-address": "","myocp-debug": true, 
-               "rsync-excludes-hidden": "", "rsync-excludes-folders": "", "myocp-tmp-dir": "",
-               "rsync-exclude-file": "" }"""
-        set2=Settings(js)
-        com2=RemoteComms(set2)
-        print("Server is up %s" % com2.serverIsUp())
-        print("rsync-exclude-file = ",self.settings("rsync-exclude-file"))
-        self.settings.create_excl_file()
-        print(open(self.settings("rsync-exclude-file"), 'r').read())
-        self.settings.remove_excl_file()
-        self.settings.remove_excl_file()
-        try:
-            self.settings('Test-key')
-        except CrashPlanError as exc:
-            print(exc)
-        js2="""{"test-key": "2" "test-key-2": True }"""
-        try:
-            set3=Settings(js2)
-        except CrashPlanError as exc:
-            print(exc)
-        open("./temp.json", "w").write(js)
-        set4=Settings("./temp.json")
-        os.unlink("./temp.json")
 
     def test04a(self):
         print("\nTEST 04a")
@@ -128,116 +95,257 @@ class Testing(object):
         com2=RemoteComms(set2)
         print("Server is up %s" % com2.serverIsUp())
 
-    def test05(self):
-        print("\nTEST 05")
-        print("Testing MountCommand")
-        mnt=MountCommand(self.settings)
-        mnt.mount()
-        mnt.umount()
         
-    def test02(self):
-        # TEST MetaData class and remote reading and writing
-        print("\nTEST 02")
-        print("Testing MetaData")
-        print("Read Remote .metadata")
-        json_str=""
-        try:
-            json_str = self.comms.readMetaData()
-        except CrashPlanError as exc:
-            print(exc)
-        print(json_str)
-        print("Create new instance of MetaData class")
-        metadata = MetaData(json_str)
-        try:
-            print("%s = %s" % ('latest-complete', metadata.get('latest-complete')))
-        except CrashPlanError as exc:
-            print(exc)
-        meta1=MetaData()
-        meta1.set('backup-today', '2019-02-20')
-        meta1.set('latest-complete', '2019-02-20-230000')
-        print("Create new instance of MetaData class")
-        js2 = repr(meta1)
-        meta2 = MetaData(js2)
-        print(meta2.get('backup-today'))
-        print("Writing .metadata Remotely")
-        try:
-            self.comms.writeMetaData(repr(meta2))
-        except CrashPlanError as exc:
-            print(exc)
-        try:
-            st,rt = self.comms.remoteCommand("ls -la %s" % (os.path.join(self.settings('backup-destination'),self.settings('local-hostname'))))
-            print(rt)
-        except CrashPlanError as exc:
-            print(exc)
-        print("Invalid .metadata")
-        try:
-            meta3 = MetaData('{"test-key": "invalid"}')
-        except CrashPlanError as exc:
-            print(exc)
-        try:
-            meta2.get("test-key")
-        except CrashPlanError as exc:
-            print(exc)
-        try:
-            meta2.set("test-key", "21")
-        except CrashPlanError as exc:
-            print(exc)
-        
-class FakeLog(object):
+class FakeLog(Log):
     def __init__(self):
         self.val = ""
     def __call__(self, val):
         self.val = val
+        print(val)
     def getVal(self):
-        return val
+        return self.val
 
 class TestMetaData(unittest.TestCase):
     """"""
-    @patch('myowncrashplan.Log')
-    def test_metadata_set_exception(self, MockClass1):
-        metadata = MetaData()
-        with self.assertRaises(CrashPlanError) as cpe:
-            metadata.set('test', 'test')
+    def setUp(self):
+        self.log = FakeLog()
         
-    @patch('myowncrashplan.Log')
-    def test_metadata_constructor_fail(self, MockClass1):
-        json_str="""{"test1": true}"""
-        #with patch.object(Log, '__call__', )
-        metadata = MetaData(json_str)
-        assert MockClass1.called
-        #assert MockClass1.getVal() == "(__init__)metadata does not have all the expected keys."
+    def test_metadata_constructor(self):
+        metadata = MetaData(self.log)
+        self.assertEqual({},metadata.meta)
+        
+    def test_metadata_set_exception(self):
+        json_str=""
+        metadata = MetaData(self.log, json_str)
+        with self.assertRaises(CrashPlanError) as cpe:
+            metadata.set("test", "t")
 
-    @patch('myowncrashplan.Log')
-    def test_metadata_get_exception(self, MockClass1):
+    def test_metadata_get_exception(self):
         json_str="""{"backup-today": "", "latest-complete": ""}"""
-        metadata = MetaData(json_str)
+        metadata = MetaData(self.log, json_str)
         with self.assertRaises(CrashPlanError) as cpe:
             metadata.get("test")
         
-    @patch('myowncrashplan.Log')
-    def test_metadata_get_success(self, MockClass1):
+    def test_metadata_get_success(self):
         json_str="""{"backup-today": "2019-01-02", "latest-complete": "2019-01-02-012345"}"""
-        metadata = MetaData(json_str)
+        metadata = MetaData(self.log, json_str)
         self.assertEqual(metadata.get("backup-today"),"2019-01-02")
 
-    @patch('myowncrashplan.Log')
-    def test_metadata_set_success(self, MockClass1):
+    def test_metadata_set_success(self):
         json_str="""{"backup-today": "2019-01-02", "latest-complete": "2019-01-02-012345"}"""
-        metadata = MetaData(json_str)
+        metadata = MetaData(self.log, json_str)
         metadata.set('backup-today', "2019-12-12")
         self.assertEqual(metadata.get("backup-today"),"2019-12-12")
 
-    @patch('myowncrashplan.Log')
-    def test_metadata__repr__success(self, MockClass1):
-        json_str="""{"backup-today": "2019-01-02", "latest-complete": "2019-01-02-012345"}"""
-        metadata = MetaData(json_str)
-        metadata.set('backup-today', "2019-12-12")
-        self.assertEqual(repr(metadata), '{"backup-today": "2019-12-12", "latest-complete": "2019-01-02-012345"}\n')
+    @patch('sys.stdout', new_callable=StringIO)
+    def test_metadata__repr__success(self, mock_stdout):
+        json_str="""{"backup-today": "2019-01-02", "latest-complate": "2019-01-02-012345"}"""
+        metadata = MetaData(self.log, json_str)
+        self.assertEqual(self.log.getVal(), "(__init__)metadata does not have all the expected keys.")
+        self.assertEqual(mock_stdout.getvalue(),"(__init__)metadata does not have all the expected keys.\n")
+        self.assertNotEqual(repr(metadata), '{"backup-today": "2019-01-02", "latest-complete": "2019-01-02-012345"}\n')
+
+class TestSettings(unittest.TestCase):
+    """"""
+    def setUp(self):
+        self.log = FakeLog()
+
+    @patch('myowncrashplan.Settings.load')
+    @patch('myowncrashplan.Settings.verify')
+    def test_settings_constructor(self, mock_verify, mock_load):
+        setting = Settings("path", self.log)
+
+    @patch('sys.stdout', new_callable=StringIO)
+    @patch('myowncrashplan.Settings.verify')
+    def test_settings_load_1(self, mock_verify, mock_stdout):
+        fp = open('test.json', 'w')
+        fp.write('')
+        fp.close()
+        with self.assertRaises(CrashPlanError) as cpe:
+            settings = Settings('test.json', self.log)
+        self.assertEqual(mock_stdout.getvalue(), "ERROR(load_settings()): problems loading settings file (Expecting value: line 1 column 1 (char 0))\n")
+        os.unlink('test.json')
+
+    @patch('sys.stdout', new_callable=StringIO)
+    @patch('myowncrashplan.Settings.verify')
+    def test_settings_load_2(self, mock_verify, mock_stdout):
+        with open('test.json', 'w') as fp:
+            fp.write('{}')
+        #fp.close()
+        settings = Settings('test.json', self.log)
+        self.assertEqual(mock_stdout.getvalue(), "Settings file loaded.\n")
+        os.unlink('test.json')
+
+    @patch('sys.stdout', new_callable=StringIO)
+    @patch('myowncrashplan.Settings.verify')
+    def test_settings_load_3(self, mock_verify, mock_stdout):
+        jstr = """{}"""
+        settings = Settings(jstr, self.log)
+        self.assertEqual(self.log.getVal(),"Settings file loaded.")
+        self.assertEqual(mock_stdout.getvalue(), "Settings file loaded.\n")
+
+    @patch('sys.stdout', new_callable=StringIO)
+    @patch('myowncrashplan.Settings.verify')
+    def test_settings_load_4(self, mock_verify, mock_stdout):
+        jstr = """{"myocp-debug": true}"""
+        settings = Settings(jstr, self.log)
+        self.assertEqual(mock_stdout.getvalue(), "Settings file loaded.\nSettings Loaded.\nsettings[myocp-debug] : True\n")
+
+    @patch('sys.stdout', new_callable=StringIO)
+    @patch('myowncrashplan.Settings.verify')
+    def test_settings_set_1(self, mock_verify, mock_stdout):
+        jstr = """{"myocp-debug": true}"""
+        settings = Settings(jstr, self.log)
+        self.assertEqual(mock_stdout.getvalue(), "Settings file loaded.\nSettings Loaded.\nsettings[myocp-debug] : True\n")
+        settings.set("test", 21)
+        self.assertEqual(settings.settings['test'], 21)
+
+    @patch('sys.stdout', new_callable=StringIO)
+    @patch('myowncrashplan.Settings.verify')
+    def test_settings_remove_1(self, mock_verify, mock_stdout):
+        jstr = """{"myocp-debug": true}"""
+        settings = Settings(jstr, self.log)
+        self.assertEqual(mock_stdout.getvalue(), "Settings file loaded.\nSettings Loaded.\nsettings[myocp-debug] : True\n")
+        settings.remove("myocp-debug")
+        with self.assertRaises(KeyError) as cpe:
+            self.assertEqual(settings.settings['myocp-debug'], True)
+
+    @patch('sys.stdout', new_callable=StringIO)
+    @patch('myowncrashplan.Settings.verify')
+    def test_settings_remove_2(self, mock_verify, mock_stdout):
+        jstr = """{"myocp-debug": true}"""
+        settings = Settings(jstr, self.log)
+        self.assertEqual(mock_stdout.getvalue(), "Settings file loaded.\nSettings Loaded.\nsettings[myocp-debug] : True\n")
+        settings.remove("myocp")
+        self.assertEqual(settings.settings['myocp-debug'], True)
+
+    @patch('sys.stdout', new_callable=StringIO)
+    @patch('myowncrashplan.Settings.verify')
+    def test_settings__call__1(self, mock_verify, mock_stdout):
+        jstr = """{"myocp-debug": true}"""
+        settings = Settings(jstr, self.log)
+        self.assertEqual(mock_stdout.getvalue(), "Settings file loaded.\nSettings Loaded.\nsettings[myocp-debug] : True\n")
+        self.assertEqual(settings("myocp-debug"), True)
+
+    @patch('sys.stdout', new_callable=StringIO)
+    @patch('myowncrashplan.Settings.verify')
+    def test_settings__call__2(self, mock_verify, mock_stdout):
+        jstr = """{"myocp-debug": true}"""
+        settings = Settings(jstr, self.log)
+        self.assertEqual(mock_stdout.getvalue(), "Settings file loaded.\nSettings Loaded.\nsettings[myocp-debug] : True\n")
+        with self.assertRaises(CrashPlanError) as cpe:
+            self.assertEqual(settings("myocp"), True)
+
+    @patch('os.unlink')
+    @patch('sys.stdout', new_callable=StringIO)
+    @patch('myowncrashplan.Settings.verify')
+    def test_settings_remove_excl_file_1(self, mock_verify, mock_stdout, mock_unlink):
+        jstr = """{"myocp-debug": true}"""
+        settings = Settings(jstr, self.log)
+        settings.remove_excl_file()
+        self.assertEqual(mock_stdout.getvalue(), "Settings file loaded.\nSettings Loaded.\nsettings[myocp-debug] : True\nrsync exclusions file does not exist.\n")
+
+    @patch('sys.stdout', new_callable=StringIO)
+    @patch('myowncrashplan.Settings.verify')
+    def test_settings_remove_excl_file_2(self, mock_verify, mock_stdout):
+        jstr = """{"rsync-exclude-file": "test.excl"}"""
+        with open('test.excl', 'w') as fp:
+            fp.write('{}')
+        settings = Settings(jstr, self.log)
+        settings.remove_excl_file()
+        self.assertEqual(mock_stdout.getvalue(), "Settings file loaded.\nrsync exclusions file removed.\n")
+        self.assertNotEqual(os.path.exists('test.excl'), True)
+
+    @patch('sys.stdout', new_callable=StringIO)
+    @patch('myowncrashplan.Settings.verify')
+    def test_settings_create_excl_file_1(self, mock_verify, mock_stdout):
+        jstr = """{"rsync-exclude-file": "test.excl",
+                   "rsync-excludes-list": "1,2,3",
+                   "myocp-debug": false
+               }"""
+        settings = Settings(jstr, self.log)
+        settings.create_excl_file()
+        self.assertEqual(mock_stdout.getvalue(), "Settings file loaded.\nrsync exclusions file created at test.excl\n")
+        os.unlink("test.excl")
+
+    @patch('sys.stdout', new_callable=StringIO)
+    @patch('myowncrashplan.Settings.verify')
+    def test_settings_create_excl_file_2(self, mock_verify, mock_stdout):
+        jstr = """{
+    "myocp-debug": false,
+    "rsync-exclude-file": "test.excl",
+    "rsync-excludes-list": "1,2,3"
+}"""
+        settings = Settings(jstr, self.log)
+        settings.write('test_1/test.json')
+        with open('test_1/test.json', 'r') as fp:
+            self.assertEqual(fp.read(), jstr)
+        shutil.rmtree('test_1')
+
+    @patch('sys.stdout', new_callable=StringIO)
+    def test_settings_create_excl_verify_1(self, mock_stdout):
+        jstr = """{ "myocp-debug": false }"""
+        settings = Settings(jstr, self.log)
+
+    @patch('sys.stdout', new_callable=StringIO)
+    def test_settings_create_excl_verify_2(self, mock_stdout):
+        jstr = """{ "myocp-debug": false,
+            "rsync-excludes-hidden": "",
+            "rsync-excludes-folders": "",
+            "rsync-exclude-file": "test.excl",
+            "myocp-tmp-dir": "test_myocp",
+            "backup-sources-extra": "",
+            "server-name": ""
+        }"""
+        settings = Settings(jstr, self.log)
+        shutil.rmtree(os.path.join(os.environ['HOME'],"test_myocp"))
+
+    @patch('sys.stdout', new_callable=StringIO)
+    def test_settings_create_excl_verify_3(self, mock_stdout):
+        jstr = """{ "myocp-debug": false,
+            "rsync-excludes-hidden": "",
+            "rsync-excludes-folders": "",
+            "rsync-exclude-file": "test.excl",
+            "myocp-tmp-dir": "test_myocp",
+            "backup-sources-extra": "1,2",
+            "server-address": "127.0.0.1",
+            "server-name": ""
+        }"""
+        with self.assertRaises(CrashPlanError) as cpe:
+            settings = Settings(jstr, self.log)
+        shutil.rmtree(os.path.join(os.environ['HOME'],"test_myocp"))
+
+    @patch('sys.stdout', new_callable=StringIO)
+    def test_settings_create_excl_verify_4(self, mock_stdout):
+        jstr = """{ "myocp-debug": false,
+            "rsync-excludes-hidden": "",
+            "rsync-excludes-folders": "",
+            "rsync-exclude-file": "test.excl",
+            "myocp-tmp-dir": "test_myocp",
+            "backup-sources-extra": "1,2",
+            "server-address": "15.0.0.1",
+            "server-name": "myhost"
+        }"""
+        #with self.assertRaises(CrashPlanError) as cpe:
+        settings = Settings(jstr, self.log)
+        shutil.rmtree(os.path.join(os.environ['HOME'],"test_myocp"))
+
+
+class TestRemoteComms(unittest.TestCase):
+    """"""
+    def setUp(self):
+        self.log = FakeLog()
+
+class TestCrashPlan(unittest.TestCase):
+    """"""
+    def setUp(self):
+        self.log = FakeLog()
+
 
 if __name__ == '__main__':
-    T1 = Testing()
+    #T1 = Testing()
     #T1.run()
-    T1.setup()
-    T1.test04a()
-    #unittest.main()
+    #T1.setup()
+    #T1.test04a()
+    unittest.main()
     
