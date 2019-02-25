@@ -1,5 +1,15 @@
 # README #
 
+### Recent Changes ###
+
+* v2.0 - Feb 2019 (started) - Client Based Version to run on the Mac and backup to the server.
+ * still needs a log rotate function.
+ * needs a scheduling system.
+ * Settings.verify() needs a little work. look in to more advance json features
+ * unit testing needs completing.
+ 
+* v0.5 - Dec 2017 - Final version of server based version
+ 
 ### What is this repository for? ###
 
 * Quick summary - This is a simple backup solution for those with a small linux server and a laptop also running linux or macOs.
