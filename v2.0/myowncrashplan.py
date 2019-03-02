@@ -242,7 +242,7 @@ class Settings(object):
     def verify(self):
         """verify settings are consistent"""
         expected_keys = ['rsync-excludes-hidden','rsync-excludes-folders','myocp-tmp-dir',
-                         'backup-sources-extra','server-name','rsync-exclude-file']
+                         'backup-sources-extra','server-name','rsync-exclude-file','maximum-used-percent']
         keys_missing = False
         for key in expected_keys:
             if key not in self.settings:
@@ -588,7 +588,7 @@ def get_opts(argv):
 def backupAlreadyRunning():
     """is the backup already running"""
     pid = os.getpid()
-    pidof = "ps -eo pid,command |awk '{$1=$1};1' | grep 'python /usr/local/bin/myowncrashplan' "
+    pidof = "ps -eo pid,command | grep -i 'python .*myowncrashplan' "
     pidof += "| grep -v grep | cut -d' ' -f1 | grep -v %d" % pid
     _st, out = unix(pidof)
     if out != "":
@@ -640,7 +640,9 @@ def initialise(errlog):
 
 def rotateLog(logfile):
     """"""
-    print("rotateLog(%s)" % logfile)
+    sz = os.stat(logfile)[stat.ST_SIZE]
+    if sz > 10*1024*1024:
+        print("rotateLog(%s) - %d bytes" % (logfile, sz))
     
 
 def main():
