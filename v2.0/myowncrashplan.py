@@ -157,8 +157,8 @@ settings_json = """
     "maximum-used-percent" : 90,
     "local-mount-point": ".myocp/mnt",
     "remote-mount-fstype": "smb",
-    "remote-mount-user": "judge",
-    "remote-mount-pswd": "r0adster",
+    "remote-mount-user": "",
+    "remote-mount-pswd": "",
     "remote-mount-point": "/zdata",
     "remote-mount-backup-dir": "myowncrashplan"
 }
