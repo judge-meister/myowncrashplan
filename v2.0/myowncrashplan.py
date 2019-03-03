@@ -75,15 +75,20 @@ import os
 import stat
 import time
 import shutil
+import shlex
 import getopt
 import json
 import socket
+import logging
+import logging.handlers
 from glob import glob
 from subprocess import getstatusoutput as unix
+import subprocess
 
 BACKUPLOG_FILE = os.path.join(os.environ['HOME'],".myocp","backup.log")
 ERRORLOG_FILE = os.path.join(os.environ['HOME'],".myocp","error.log")
 CONFIG_FILE = os.path.join(os.environ['HOME'],".myocp","settings.json")
+
 
 class CrashPlanError(Exception):
     """crash plan error"""
@@ -110,16 +115,16 @@ class TimeDate(object):
     def today():
         return time.strftime("%Y-%m-%d")
 
-class Log(object):
-    """Logging object"""
-    def __init__(self, logfile):
-        self.logfile = logfile
+#class Log(object):
+#    """Logging object"""
+#    def __init__(self, logfile):
+#        self.logfile = logfile
 
-    def __call__(self, msg):
-        """write to the log file"""
-        line = "%s [%d] - %s\n" % (TimeDate.stamp(), os.getpid(), msg)
-        with open(self.logfile, 'a') as fp:
-            fp.write(line)
+#    def __call__(self, msg):
+#        """write to the log file"""
+#        line = "%s [%d] - %s\n" % (TimeDate.stamp(), os.getpid(), msg)
+#        with open(self.logfile, 'a') as fp:
+#            fp.write(line)
 
 
 # Potential other options to cater for:
@@ -146,36 +151,13 @@ default_settings_json = """
     "maximum-used-percent" : 90
 }
 """
-settings_json = """
-{
-    "server-name": "skynet",
-    "server-address": "192.168.0.7",
-    "backup-destination": "/zdata/myowncrashplan",
-    "backup-destination-uses-hostname": true, 
-    "backup-sources-extra": "/Volumes/Nifty128",
-    "logfilename": "myowncrashplan.log",
-    "rsync-options-exclude": "--delete --delete-excluded ",
-    "rsync-exclude-file": "myocp_excl",
-    "rsync-options": "--quiet --bwlimit=2500 --timeout=300 ",
-    "rsync-excludes-hidden": ".AppleDB,.AppleDesktop,.AppleDouble,:2e*,.DS_Store,._*,.Trashes,.Trash,.fseventsd,.bzvol,.cocoapods",
-    "rsync-excludes-folders": "lost+found,Network Trash Folder,Temporary Items,Saved Application State,Library,Parallels,VirtualBoxVMs",
-    "myocp-debug": false,
-    "myocp-tmp-dir": ".myocp",
-    "maximum-used-percent" : 90,
-    "local-mount-point": ".myocp/mnt",
-    "remote-mount-fstype": "smb",
-    "remote-mount-user": "",
-    "remote-mount-pswd": "",
-    "remote-mount-point": "/zdata",
-    "remote-mount-backup-dir": "myowncrashplan"
-}
-"""
 
 class MetaData(object):
     """"""
     def __init__(self, log, json_str=None):
         """"""
-        assert isinstance(log, Log)
+        #assert isinstance(log, Log)
+        assert isinstance(log, logging.Logger)
         self.log = log
         self.expected_keys = ['latest-complete','backup-today']
         if json_str:
@@ -183,7 +165,7 @@ class MetaData(object):
             for k in self.expected_keys:
                 if k not in self.meta:
                     #raise CrashPlanError("(__init__)metadata does not have all the expected keys.")
-                    self.log("(__init__)metadata does not have all the expected keys.")
+                    self.log.info("(__init__)metadata does not have all the expected keys.")
                     self.meta[k] = ""
         else:
             self.meta = {}
@@ -210,7 +192,8 @@ class Settings(object):
     """Settings object"""
     def __init__(self, path, log):
         """"""
-        assert isinstance(log, Log)
+        #assert isinstance(log, Log)
+        assert isinstance(log, logging.Logger)
         assert isinstance(path, str)
         self.path = path
         self.log = log
@@ -226,17 +209,17 @@ class Settings(object):
             else:
                 # use path as a string initially
                 self.settings = json.loads(self.path)
-            self.log("Settings file loaded.")
+            self.log.info("Settings file loaded.")
         except json.decoder.JSONDecodeError as exc:
             #print("ERROR(load_settings()): problems loading settings file (%s)" % exc)
-            self.log("ERROR(load_settings()): problems loading settings file (%s)" % exc)
+            self.log.error("ERROR(load_settings()): problems loading settings file (%s)" % exc)
             #sys.exit(1)
             raise CrashPlanError(exc)
         else:
             if 'myocp-debug' in self.settings and self.settings['myocp-debug']:
                 print("Settings Loaded.")
                 for k in self.settings:
-                    print("settings[%s] : %s" % (k, self.settings[k]))
+                    self.log.debug("settings[%s] : %s" % (k, self.settings[k]))
         
     def write(self, filename):
         """write the settins.json file"""
@@ -253,11 +236,12 @@ class Settings(object):
         keys_missing = False
         for key in expected_keys:
             if key not in self.settings:
-                self.log("key %s not found in settings file.")
+                self.log.error("key %s not found in settings file.")
                 keys_missing = True
         if keys_missing:
-            self.log("Problems verifying Settings file. There are some essential settings missing.")
+            self.log.error("Problems verifying Settings file. There are some essential settings missing.")
         else:
+            self.settings['rsync-options'].replace("--quiet","")
             # check if server name and address match each other
             # merge rsync-excludes-hidden and rsync-excludes-folder lists
             self.settings['rsync-excludes-list'] = self.settings['rsync-excludes-hidden'].split(',')
@@ -283,24 +267,24 @@ class Settings(object):
                 self.settings['server-address'] = socket.gethostbyname(self.settings['server-name'])
         
             self.settings['local-hostname'] = socket.gethostname()
-            self.log("Settings file verified.")
+            self.log.info("Settings file verified.")
     
     def create_excl_file(self):
         """create the rsync exclusions file"""
         with open(self.settings['rsync-exclude-file'], 'w') as fp:
             fp.write("\n".join(self.settings['rsync-excludes-list']))
-        self.log("rsync exclusions file created at %s" % self.settings['rsync-exclude-file'])
+        self.log.info("rsync exclusions file created at %s" % self.settings['rsync-exclude-file'])
         if self.settings['myocp-debug']:
-            print("create_rsync_excl() - EXCLUDES = \n%s" % self.settings['rsync-excludes-list'])
-            print("create_rsync_excl() - %s exists %s" % (self.settings['rsync-exclude-file'], os.path.exists(self.settings['rsync-exclude-file'])))
+            self.log.debug("create_rsync_excl() - EXCLUDES = \n%s" % self.settings['rsync-excludes-list'])
+            self.log.debug("create_rsync_excl() - %s exists %s" % (self.settings['rsync-exclude-file'], os.path.exists(self.settings['rsync-exclude-file'])))
 
     def remove_excl_file(self):
         """delete the rsync exclusions file"""
         if 'rsync-exclude-file' in self.settings and os.path.exists(self.settings['rsync-exclude-file']):
             os.unlink(self.settings['rsync-exclude-file'])
-            self.log("rsync exclusions file removed.")
+            self.log.info("rsync exclusions file removed.")
         else:
-            self.log("rsync exclusions file does not exist.")
+            self.log.info("rsync exclusions file does not exist.")
             
     def set(self, key, val):
         """"""
@@ -323,7 +307,8 @@ class RemoteComms(object):
     """
     def __init__(self, settings, log):
         assert isinstance(settings, Settings)
-        assert isinstance(log, Log)
+        #assert isinstance(log, Log)
+        assert isinstance(log, logging.Logger)
         self.settings = settings
         self.log = log
         
@@ -335,7 +320,7 @@ class RemoteComms(object):
         ret = True
         st, _out = unix("ping -q -c1 -W5 %s >/dev/null 2>&1" % host_name)
         if st != 0:
-            self.log("Backup subject is Off Line at present.")
+            self.log.error("Backup subject is Off Line at present.")
             ret = False
         return ret
         
@@ -346,8 +331,8 @@ class RemoteComms(object):
         #print(remote)
         st, rt = unix(remote)
         if st != 0:
-            self.log("ERROR(remoteCommand): %s" % command)
-            self.log("ERROR(remoteCommand): %d %s" % (st, rt))
+            self.log.error("(remoteCommand): %s" % command)
+            self.log.error("(remoteCommand): %d %s" % (st, rt))
             #raise CrashPlanError("ERROR: remote command failed. (%s)" % command)
         return st,rt
 
@@ -356,8 +341,8 @@ class RemoteComms(object):
         remote = "scp %s %s:%s" % (filename, self.settings('server-address'), os.path.join(self.settings("backup-destination"),self.settings('local-hostname')))
         st,rt = unix(remote)
         if st != 0:
-            self.log("ERROR(remoteCommand): %s" % remote)
-            self.log("ERROR(remoteCommand): %d %s" % (st, rt))
+            self.log.error("(remoteCommand): %s" % remote)
+            self.log.error("(remoteCommand): %d %s" % (st, rt))
             raise CrashPlanError("ERROR: remote command failed. (%s)" % remote)
 
     def remoteSpace(self):
@@ -451,7 +436,8 @@ class CrashPlan(object):
         assert isinstance(settings, Settings)
         assert isinstance(remote_comms, RemoteComms)
         assert isinstance(meta, MetaData)
-        assert isinstance(log, Log)
+        #assert isinstance(log, Log)
+        assert isinstance(log, logging.Logger)
         self.DRY_RUN = dry_run
         self.log = log
         # call settings loader and verifier
@@ -461,7 +447,8 @@ class CrashPlan(object):
         self.meta = meta 
 
     def rsyncCmd(self):
-        cmd = "rsync -av "
+        """"""
+        cmd = "rsync -av"
         if self.DRY_RUN:
             cmd += " --dry-run"
         # use LATEST as the link-dest
@@ -473,8 +460,28 @@ class CrashPlan(object):
                 cmd += " --link-dest=../%s" % os.path.basename(baklist[-1])
         cmd += " "+self.settings('rsync-options-exclude')
         cmd += " "+self.settings('rsync-options')
-        cmd += " --log-file=%s" % BACKUPLOG_FILE #--log-file=myowncrashplan.log
+        #cmd += " --log-file=%s" % BACKUPLOG_FILE #--log-file=myowncrashplan.log
+        #cmd += " --log-file-format=\"RSYNC - %i %n%L\""
         cmd += " "+self.settings('rsync-exclude-file-option')
+        return cmd
+        
+    def rsyncCmdList(self):
+        """"""
+        cmd = ["rsync", "-av"]
+        if self.DRY_RUN:
+            cmd.append("--dry-run")
+        # use LATEST as the link-dest
+        if self.meta.get('latest-complete') != "" and os.path.exists(self.meta.get('latest-complete')):
+            cmd.append("--link-dest=../%s" % (self.meta.get('latest-complete')))
+        else:
+            baklist = self.comms.getBackupList()
+            if len(baklist) > 0:
+                cmd.append("--link-dest=../%s" % os.path.basename(baklist[-1]))
+        cmd += self.settings('rsync-options-exclude').split(' ')
+        cmd += self.settings('rsync-options').split(' ')
+        #cmd.append("--log-file=%s" % BACKUPLOG_FILE) #--log-file=myowncrashplan.log
+        #cmd.append("--log-file-format=\"RSYNC - %i %n%L\"")
+        cmd.append(self.settings('rsync-exclude-file-option'))
         return cmd
         
     def doBackup(self):
@@ -492,7 +499,7 @@ class CrashPlan(object):
                 if self.backupFolder(src):
                     c = c+1
         except KeyboardInterrupt:
-            self.log("Backup of %s was interrupted by user intevention" % src)
+            self.log.info("Backup of %s was interrupted by user intevention" % src)
 
         self.backupSuccessful = (c == len(sources) and not self.DRY_RUN)
         print ("Backup successful? ",self.backupSuccessful, "len(sources) = ", len(sources))
@@ -505,36 +512,54 @@ class CrashPlan(object):
         rsync -av --link-dest=../LATEST <src> <server-address>:<backup-destination>/<local-hostname>/WORKING
         """
         cmd = self.rsyncCmd()
+        #cmd = self.rsyncCmdList()
         
         destination = os.path.join(self.settings('backup-destination'), self.local_hostname, "WORKING")
 
         cmd += " %s \"%s:%s\" " % (src, self.settings('server-address'), destination)
+        #cmd.append(src)
+        #cmd.append("\"%s:%s\"" % (self.settings('server-address'), destination))
 
-        self.log("Start Backing Up to - %s" % destination)
-        self.log(cmd)
+        self.log.info("Start Backing Up to - %s" % destination)
+        self.log.info(cmd)
         
-        print("CALL %s" % cmd) 
-        st, out = unix(cmd)
-
-        result = self.interpretResults(st, out)
-        self.log("Backup of %s was %ssuccessful\n" % (src, '' if result == True else 'not '))
+        #print("CALL %s" % cmd) 
+        #print(shlex.split(cmd))
+        #st, out = unix(cmd)
+        #print(call.split(' '))
+        process = subprocess.Popen(shlex.split(cmd), stdout=subprocess.PIPE)#, shell=True)
+        now = int(time.time())
+        while True:
+            output = process.stdout.readline()
+            if output == b'' and process.poll() is not None:
+                break
+            if output:
+                try:
+                    self.log.info(output.strip().decode())
+                except UnicodeDecodeError as exc:
+                    self.log.info(output.strip())
+        rc = process.poll()
+        #print("rc=",rc)
+        #result = self.interpretResults(st, out)
+        result = self.interpretResults(rc, "")
+        self.log.info("Backup of %s was %ssuccessful\n" % (src, '' if result == True else 'not '))
         return result
 
     def interpretResults(self, st, out):
         """return true if status returned is 0 or a known set of non-zero values"""
-        self.log("doBackup - status = [%d] %s" % (st, out))
+        self.log.info("doBackup - status = [%d] %s" % (st, out))
         if st == 0:
             # record that a backup has been performed today
             return True 
         elif st == 24 or st == 6144 or out.find("some files vanished") > -1: 
             # ignore files vanished warning
             # record that a backup has been performed today
-            self.log("Some files vanished (code 24 or 6144) - Filesystem changed after backup started.")
+            self.log.info("Some files vanished (code 24 or 6144) - Filesystem changed after backup started.")
             return True
         elif st == 23: # some files could not be transferred - permission denied at source
             # ignore this error, files probably not owned by current user
             # record that a backup has been performed today
-            self.log("Some files could not be transferred (code 23) - look for files/folders you cannot read.")
+            self.log.info("Some files could not be transferred (code 23) - look for files/folders you cannot read.")
             return True
         return False
 
@@ -551,6 +576,7 @@ class CrashPlan(object):
                 self.comms.remoteCommand("mv %s %s" % (src, dest))
             except CrashPlanError as exc:
                 print(exc)
+                self.log.error(exc)
 
 
 # ------------------------------------------------------------------------------
@@ -610,7 +636,8 @@ def backupAlreadyRunning():
 def weHaveBackedUpToday(comms, log):
     """this relies on remote metadata, which could be stored locally also"""
     assert isinstance(comms, RemoteComms)
-    assert isinstance(log, Log)
+    #assert isinstance(log, Log)
+    assert isinstance(log, logging.Logger)
     meta = MetaData(log, comms.readMetaData())
     if meta.get('backup-today') == TimeDate.today():
         return True
@@ -621,7 +648,8 @@ def initialise(errlog):
     # server-name
     # backup-destination
     # backup-sources-extra
-    assert isinstance(errlog, Log)
+    #assert isinstance(errlog, Log)
+    assert isinstance(errlog, logging.Logger)
     if not os.path.exists(CONFIG_FILE):
         settings = Settings(default_settings_json, errlog)
         print("Crash Plan settings file missing.")
@@ -650,20 +678,35 @@ def initialise(errlog):
         print("\nTake a look at ~/.myocp/settings.json to examine the exclusions filters before starting the first backup.")
         sys.exit()
 
-def rotateLog(logfile):
-    """"""
-    sz = os.stat(logfile)[stat.ST_SIZE]
-    if sz > 10*1024*1024:
-        print("rotateLog(%s) - %d bytes" % (logfile, sz))
+
+def createLogger():
+    # create logger with 'myowncrashplan'
+    logger = logging.getLogger('myowncrashplan')
+    logger.setLevel(logging.DEBUG)
+    # create rotating file handler which logs even debug messages
+    fh = logging.handlers.RotatingFileHandler(ERRORLOG_FILE, maxBytes=1024*1024, backupCount=5)
+    fh.setLevel(logging.DEBUG)
+    # create console handler with a higher log level
+    ch = logging.StreamHandler()
+    ch.setLevel(logging.ERROR)
+    # create formatter and add it to the handlers
+    formatter = logging.Formatter('%(asctime)s [%(process)d] %(levelname)s - %(message)s')
+    fh.setFormatter(formatter)
+    ch.setFormatter(formatter)
+    # add the handlers to the logger
+    logger.addHandler(fh)
+    logger.addHandler(ch)
     
+    return logger
+
+
 
 def main():
     """do all the preliminary checks before starting a backup"""
     dry_run, force = get_opts(sys.argv[1:])
 
-    baklog = Log(BACKUPLOG_FILE)
-    errlog = Log(ERRORLOG_FILE)
-    
+    errlog = createLogger()
+
     initialise(errlog)
 
     # instantiate some util classes
@@ -673,21 +716,21 @@ def main():
     
     # basic tests before we start 
     if backupAlreadyRunning():
-        baklog("Backup already running. [pid %s], so exit here." % (out))
+        errlog.info("Backup already running. [pid %s], so exit here." % (out))
         sys.exit(0)
 
     # - is the server up? 
     # - have we backed up today?
     if comms.serverIsUp(): 
-        baklog("The Server is Up. The backup might be able to start.")
+        errlog.info("The Server is Up. The backup might be able to start.")
         
         comms.createRootBackupDir()
 
         if weHaveBackedUpToday(comms, errlog) and not force:
-            baklog("We Have Already Backed Up Today, so exit here.")
+            errlog.info("We Have Already Backed Up Today, so exit here.")
             sys.exit(0)
         elif weHaveBackedUpToday(comms, errlog) and force:
-            baklog("We Have Already Backed Up Today, but we are running another backup anyway.")
+            errlog.info("We Have Already Backed Up Today, but we are running another backup anyway.")
             
         # Is There Enough Space or can space be made available
         backup_list = comms.getBackupList()
@@ -699,15 +742,13 @@ def main():
             oldest = backup_list[0]
 
         if comms.remoteSpace() <= settings('maximum-used-percent'):
-            baklog("There is enough space for the next backup.")
+            errlog.info("There is enough space for the next backup.")
 
-            mcp = CrashPlan(settings, meta, baklog, comms, dry_run)
+            mcp = CrashPlan(settings, meta, errlog, comms, dry_run)
             mcp.doBackup()
             mcp.finishUp()
             
-    rotateLog(BACKUPLOG_FILE)
-    rotateLog(ERRORLOG_FILE)
-    
+
 
 if __name__ == '__main__':
     main()
