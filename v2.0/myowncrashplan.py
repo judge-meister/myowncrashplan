@@ -21,7 +21,7 @@ Backup Scenarios
   folder still exists.
 
 * incremental backup starts after a previous failed to complete backup.
-- Use WORKING and link to LATEST_COMPLETE to continue the backup. 
+- Use WORKING and link to LATEST_COMPLETE to continue the backup.
 
 * incremental backup completes after starting from incomplete backup.
 - Once complete, rename WORKING to <Date/Time NOW> and update LATEST_COMPLETE 
@@ -38,11 +38,11 @@ Notes
 
 We could always use the name WORKING for backups in progress and only rename 
 them to Date/Time once complete. That way if WORKING exists the backup will 
-use it, if not then it'll get created.  In both cases LATEST_COMPLETE will be
+use it, if not then it'll get created.  In both cases LATEST_COMPLETE will be
 used for linking.
 
 We need to check that the destination filesystem supports hardlinks and 
-symlinks, because smbfs mounts do not.  If using a usb drive then it would 
+symlinks, because smbfs mounts do not.  If using a usb drive then it would 
 have to be formatted with something that does supported it.
 
 -----------------
@@ -62,9 +62,16 @@ Still To Do
   - find latest and create symlink called WORKING
 
 """
+import sys
+import platform
+# confirm we are running the right version of python
+major, minor, patch = platform.python_version().split('.')
+version = float(major)+float(minor)/10.0
+if version < 3.5:
+    sys.stderr.write("Requires Python >= 3.7\n")
+    sys.exit(1)
 
 import os
-import sys
 import stat
 import time
 import shutil
@@ -311,7 +318,9 @@ class Settings(object):
 
 
 class RemoteComms(object):
-    """Remote Comms object for talking to the remote server"""
+    """Remote Comms object for talking to the remote server
+     - this presumes the server is a Linux box
+    """
     def __init__(self, settings, log):
         assert isinstance(settings, Settings)
         assert isinstance(log, Log)
@@ -393,6 +402,7 @@ class RemoteComms(object):
             fp.write(meta)
         self.remoteCopy(metafile)
         
+
 class MountCommand(object):
     """create a mount command that is fstype specific
     types - smb, ntfs, nfs, msdos, hfs, exfat 
@@ -408,7 +418,7 @@ class MountCommand(object):
         self.fstype = settings('remote-mount-fstype')
         self.tool = ""
         if self.fstype == 'smb':
-            self.tool = "mount_smbfs"
+            self.tool = "mount_smbfs" # for MacOs, or mount.cifs for Linux
         #elif self.fstype == "nfs":
         #    self.tool = "mount_nfs"
 
@@ -586,10 +596,12 @@ def get_opts(argv):
     return dry_run, force
 
 def backupAlreadyRunning():
-    """is the backup already running"""
+    """is the backup already running?
+     - this works for MacOs and Linux
+    """
     pid = os.getpid()
     pidof = "ps -eo pid,command | grep -i 'python .*myowncrashplan' "
-    pidof += "| grep -v grep | cut -d' ' -f1 | grep -v %d" % pid
+    pidof += "| grep -v grep | awk -F' ' '{print $1}' | grep -v '^%d$'" % pid
     _st, out = unix(pidof)
     if out != "":
         return True

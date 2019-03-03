@@ -7,7 +7,10 @@
     * needs a scheduling system.
     * Settings.verify() needs a little work. look in to more advance json features
     * unit testing needs completing.
- 
+    * cater for platform specific differences and features (MacOs, Linux, Windoze?)
+    * check version of python installed 
+    * check for filesystem support for symlinks and hardlinks
+    
 + v0.5 - Dec 2017 - Final version of server based version
  
 ### What is this repository for? ###
