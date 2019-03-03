@@ -3,13 +3,14 @@
 ### Recent Changes ###
 
 + v2.0 - Feb 2019 (started) - Client Based Version to run on the Mac and backup to the server.
-    * still needs a log rotate function.
+    * DONE - still needs a log rotate function.
+    * DONE - use logging module
     * needs a scheduling system.
     * Settings.verify() needs a little work. look in to more advance json features
     * unit testing needs completing.
-    * cater for platform specific differences and features (MacOs, Linux, Windoze?)
-    * check version of python installed 
+    * DONE - check version of python used to run this is > 3.5
     * check for filesystem support for symlinks and hardlinks
+    * cater for platform specific differences and features (MacOs, Linux, Windoze?)
     
 + v0.5 - Dec 2017 - Final version of server based version
  
