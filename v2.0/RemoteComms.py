@@ -5,9 +5,27 @@
 
 import os
 import logging
-from subprocess import getstatusoutput as unix
+import platform
 from Settings import Settings
+from Utils import process
 from CrashPlanError import CrashPlanError
+
+def ping(host):
+    """
+    Returns True if host (str) responds to a ping request.
+    Remember that a host may not respond to a ping (ICMP) request even if the host name is valid.
+    
+    Note: on Windows this function will still return True if you get a Destination Host Unreachable
+          error.
+    """
+    # Option for the number of packets as a function of 
+    param = '-n' if platform.system().lower() == 'windows' else '-c'
+    # Building the command. Ex: "ping -c 1 google.com"
+    command = ['ping', '-q', param, '1', '-W5', host]
+
+    st, _rt = process(command)
+    return st == 0
+
 
 class RemoteComms():
     """Remote Comms object for talking to the remote server
@@ -28,40 +46,46 @@ class RemoteComms():
     def hostIsUp(self, host_name):
         """is the subject of this backup available"""
         ret = True
-        st, _out = unix(f"ping -q -c1 -W5 {host_name} >/dev/null 2>&1")
 
-        if st != 0:
+        if not ping(host_name):
             self.log.error("Backup subject is Off Line at present.")
             ret = False
 
         return ret
         
+
     def remoteCommand(self, command):
         """perform a remote command on the server and get the response"""
-        remote = f"ssh -q {self.settings('server-address')} {command}"
-        st, rt = unix(remote)
+        remote = ["ssh", "-q", self.settings('server-address')]
+        remote.append(command)
 
+        st, rt = process(remote)
         if st != 0:
             self.log.error(f"(remoteCommand): {command}")
             self.log.error(f"(remoteCommand): {st:d} {rt}")
 
         return st, rt
 
-    def remoteCopy(self, filename):
+    def remoteCopy(self, filename, dest=None):
         """scp file server:/path/to/dir"""
-        remote = "scp {0:s} {1:s}:{2:s}".format(filename, self.settings('server-address'), 
-                                                os.path.join(self.settings("backup-destination"), 
-                                                             self.settings('local-hostname')))
-        st, rt = unix(remote)
+        if dest:
+            dest_filename = os.path.basename(dest)
+        else:
+            dest_filename = os.path.basename(filename)
+        remote = ["scp", filename, self.settings('server-address')+":"+ 
+                  os.path.join(self.settings("backup-destination"), 
+                               self.settings('local-hostname'), dest_filename)]
+
+        st, rt = process(remote)
 
         if st != 0:
             self.log.error(f"(remoteCommand): {remote}")
             self.log.error(f"(remoteCommand): {st:d} {rt}")
-            raise CrashPlanError("ERROR: remote command failed. ({remote})")
+            raise CrashPlanError(f"ERROR: remote command failed. ({remote})")
 
     def remoteSpace(self):
         """get percentage space used on remote server"""
-        cmd = "df -h | grep %s | awk -F' ' '{print $5}'" % self.settings('backup-destination')
+        cmd = "df -h | grep "+self.settings('backup-destination')+" | awk -F' ' '{print $5}'"
         _st, response = self.remoteCommand(cmd)
         return int(response.replace('%', ''))
     
@@ -74,8 +98,8 @@ class RemoteComms():
 
     def getBackupList(self):
         """get list of backup folders"""
-        cmd = "ls -d %s/%s/20*" % (self.settings("backup-destination"),
-                                   self.settings('local-hostname'))
+        cmd = "ls -d %s/20*" % os.path.join(self.settings("backup-destination"), 
+                                            self.settings('local-hostname'))
         st, response = self.remoteCommand(cmd)
         bu_list = []
         if st == 0:
@@ -90,5 +114,4 @@ class RemoteComms():
         #cmd = f"rm -rf {oldest}"
         #response = self.remoteCommand("rm -rf %s" % (oldest))
         
-
 

@@ -15,15 +15,12 @@ default_settings_json = """
     "server-address": "",
     "backup-destination": "",
     "backup-destination-uses-hostname": true, 
-    "backup-sources-extra": "",
+    "extra-backup-sources": "",
     "logfilename": "myowncrashplan.log",
-    "rsync-options-exclude": "--delete --delete-excluded ",
-    "rsync-exclude-file": "myocp_excl",
-    "rsync-options": "--quiet --bwlimit=2500 --timeout=300 ",
-    "rsync-excludes-hidden": ".AppleDB,.AppleDesktop,.AppleDouble,:2e*,.DS_Store,._*,.Trashes,.Trash,.fseventsd,.bzvol,.cocoapods",
-    "rsync-excludes-folders": "lost+found,Network Trash Folder,Temporary Items,Saved Application State,Library,Parallels,VirtualBoxVMs,VirtualBox VMs",
-    "myocp-debug": false,
-    "myocp-tmp-dir": ".myocp",
+    "exclude-files": ".AppleDB,.AppleDesktop,.AppleDouble,:2e*,.DS_Store,._*,.Trashes,.Trash,.fseventsd,.bzvol,.cocoapods",
+    "exclude-folders": "lost+found,Network Trash Folder,Temporary Items,Saved Application State,Library,Parallels,VirtualBoxVMs,VirtualBox VMs",
+    "debug-level": 0,
+    "settings-dir": ".myocp",
     "maximum-used-percent" : 90
 }
 """
@@ -60,7 +57,7 @@ class Settings():
             raise CrashPlanError(exc)
 
         else:
-            if 'myocp-debug' in self.settings and self.settings['myocp-debug']:
+            if 'debug-level' in self.settings and self.settings['debug-level'] > 0:
                 print("Settings Loaded.")
 
                 for k in self.settings:
@@ -76,74 +73,59 @@ class Settings():
         with open(filename, "w") as fp:
             fp.write(json_str)
 
+    # pylint: disable=too-many-branches
     def verify(self):
         """verify settings are consistent"""
-        expected_keys = ['rsync-excludes-hidden', 'rsync-excludes-folders', 'myocp-tmp-dir',
-                         'backup-sources-extra', 'server-name', 'rsync-exclude-file', 
-                         'maximum-used-percent']
+        expected_keys = ['exclude-files', 'exclude-folders', 'settings-dir',
+                         'extra-backup-sources', 'server-name', 'maximum-used-percent']
+        unexpected_keys = ['rsync-excludes-list']
+        
         keys_missing = False
+        invalid_key = False
 
         for key in expected_keys:
 
             if key not in self.settings:
-                self.log.error("key %s not found in settings file.")
+                self.log.error(f"expected key {key} not found in settings file.")
                 keys_missing = True
 
-        if keys_missing:
+        for key in unexpected_keys:
+            if key in self.settings:
+                self.log.error(f"unexpected key {key} found in settings file.")
+                invalid_key = True
+                
+        if keys_missing or invalid_key:
             self.log.error("Problems verifying Settings file. There are some essential settings missing.")
+            raise CrashPlanError("ERROR(Settings.verify(): Problems verifying settings file.")
 
         else:
-            # remove quiet option as it blocks the logging feature
-            self.settings['rsync-options'].replace("--quiet", "")
+            self.settings['settings-dir'] = os.path.join(os.environ['HOME'], self.settings['settings-dir'])
+            os.makedirs(self.settings['settings-dir'], mode=0o755, exist_ok=True)
 
-            # merge rsync-excludes-hidden and rsync-excludes-folder lists
-            self.settings['rsync-excludes-list'] = self.settings['rsync-excludes-hidden'].split(',')
-            self.settings['rsync-excludes-list'] += self.settings['rsync-excludes-folders'].split(',')
-
-            # merge rsync-exclude-file and rsync-exclude-file-option
-            self.settings['myocp-tmp-dir'] = os.path.join(os.environ['HOME'], self.settings['myocp-tmp-dir'])
-            os.makedirs(self.settings['myocp-tmp-dir'], mode=0o755, exist_ok=True)
-            self.settings['rsync-exclude-file'] = os.path.join(self.settings['myocp-tmp-dir'], self.settings['rsync-exclude-file'])
-            self.settings['rsync-exclude-file-option'] = "--exclude-from=%s" % (self.settings['rsync-exclude-file'])
-
-            if self.settings["backup-sources-extra"].find(',') > -1:
-                self.settings["backup-sources-extra-list"] = self.settings["backup-sources-extra"].split(',')
+            if self.settings["extra-backup-sources"].find(',') > -1:
+                self.settings["extra-backup-sources-list"] = self.settings["extra-backup-sources"].split(',')
             else:
-                self.settings["backup-sources-extra-list"] = [self.settings["backup-sources-extra"]]
+                self.settings["extra-backup-sources-list"] = [self.settings["extra-backup-sources"]]
             
             # check if server name and address match each other
-            if 'server-address' in self.settings and self.settings['server-address'] != "":
+            if self.settings['server-name'] != '':
                 try:
-                    if self.settings['server-address'] != socket.gethostbyname(self.settings['server-name']):
-                        raise CrashPlanError("ERROR(Settings.verify(): Server name and Address do not match.")
+                    server_address = socket.gethostbyname(self.settings['server-name'])
                 except socket.gaierror as exc:
-                    self.log(exc)
+                    self.log.error(exc)
+                    raise CrashPlanError("ERROR(Settings.verify(): server %s not available on network." % self.settings['server-name'])
             else:
-                self.settings['server-address'] = socket.gethostbyname(self.settings['server-name'])
+                raise CrashPlanError("ERROR(Settings.verify(): server-name is empty.")
+                
+            if 'server-address' in self.settings and self.settings['server-address'] != "":
+                if self.settings['server-address'] != server_address:
+                    raise CrashPlanError("ERROR(Settings.verify(): Server name and Address do not match.")
+            else:
+                self.settings['server-address'] = server_address
         
             self.settings['local-hostname'] = socket.gethostname()
             self.log.info("Settings file verified.")
     
-    def create_excl_file(self):
-        """create the rsync exclusions file"""
-        with open(self.settings['rsync-exclude-file'], 'w') as fp:
-            fp.write("\n".join(self.settings['rsync-excludes-list']))
-
-        self.log.info("rsync exclusions file created at %s" % self.settings['rsync-exclude-file'])
-
-        if self.settings['myocp-debug']:
-            self.log.debug("create_rsync_excl() - EXCLUDES = \n%s" % self.settings['rsync-excludes-list'])
-            self.log.debug("create_rsync_excl() - %s exists %s" % (self.settings['rsync-exclude-file'], 
-                                                                   os.path.exists(self.settings['rsync-exclude-file'])))
-
-    def remove_excl_file(self):
-        """delete the rsync exclusions file"""
-        if 'rsync-exclude-file' in self.settings and os.path.exists(self.settings['rsync-exclude-file']):
-            os.unlink(self.settings['rsync-exclude-file'])
-            self.log.info("rsync exclusions file removed.")
-        else:
-            self.log.info("rsync exclusions file does not exist.")
-            
     def set(self, key, val):
         """add a key,val pair to the settings"""
         self.settings[key] = val

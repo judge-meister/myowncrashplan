@@ -35,13 +35,20 @@ class MetaData():
 
         if json_str:
             self.meta = json.loads(json_str)
-
-            for k in self.expected_keys:
-                if k not in self.meta:
-                    self.log.info("(__init__)metadata does not have all the expected keys.")
-                    self.meta[k] = ""
         else:
-            self.meta = {}
+            self.readMetaData()
+        self.verify()
+
+    def verify(self):
+        """verify keys in metadata"""
+        for k in self.expected_keys:
+            if k not in self.meta:
+                #self.log.info(f"MetaData added missing expected key {k}.")
+                self.meta[k] = ""
+        for k in list(self.meta.keys()):
+            if k not in self.expected_keys:
+                self.log.info(f"MetaData removed unexpected key {k}.")
+                del self.meta[k]
 
     def get(self, key):
         """get a value from the metadata"""
@@ -61,11 +68,19 @@ class MetaData():
         """dump the json version of the metadata"""
         return json.dumps(self.meta)+"\n"
 
-
     def readMetaData(self):
+        """read the locally stored .metadata file"""
+        self.meta = {}
+        meta_file = os.path.join(os.environ['HOME'], self.settings('settings-dir'), '.metadata')
+        if os.path.exists(meta_file):
+            with open(meta_file, 'r') as fp:
+                self.meta = json.loads(fp.read())
+
+
+    def readRemoteMetaData(self):
         """read the remote metadata file"""
-        cmd = "cat %s/.metadata" % os.path.join(self.settings('backup-destination'), 
-                                                self.settings('local-hostname'))
+        cmd = ["cat", "%s/.metadata" % os.path.join(self.settings('backup-destination'), 
+                                                    self.settings('local-hostname'))]
         st, rt = self.comms.remoteCommand(cmd)
 
         if st != 0:
@@ -76,7 +91,7 @@ class MetaData():
         
     def writeMetaData(self):
         """write the metadata file locally and copy it to remote server"""
-        metafile = os.path.join(os.environ['HOME'], self.settings("myocp-tmp-dir"), '.metadata')
+        metafile = os.path.join(os.environ['HOME'], self.settings("settings-dir"), '.metadata')
 
         with open(metafile, 'w') as fp:
             fp.write(repr(self))

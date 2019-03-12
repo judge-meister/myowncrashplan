@@ -7,3 +7,6 @@ htmlcov
 __pycache__
 .coverage
 myowncrashplan.log
+test
+gui
+.hgignore

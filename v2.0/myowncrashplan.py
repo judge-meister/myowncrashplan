@@ -129,7 +129,8 @@ def weHaveBackedUpToday(comms, log, settings):
     assert isinstance(settings, Settings)
 
     meta = MetaData(log, comms, settings)
-
+    meta.readMetaData()
+    
     if meta.get('backup-today') == TimeDate.today():
         return True
     return False
