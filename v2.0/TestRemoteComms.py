@@ -61,8 +61,10 @@ class TestRemoteComms(unittest.TestCase):
         """verify remoteSpace and getBackupList"""
         remote = self.remote
 
-        self.assertEqual(remote.remoteSpace(), 85)
-        self.assertEqual(len(remote.getBackupList()), 7)
+        space = remote.remoteSpace() # gives a percent space used
+        self.assertGreater(space, 0)
+        self.assertLessEqual(space, 100)
+        self.assertGreater(len(remote.getBackupList()), 1)
 
     def test_remote_comms_command_fail(self):
         """verify fail response from remoteCommand"""

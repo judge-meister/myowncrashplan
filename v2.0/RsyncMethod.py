@@ -28,7 +28,17 @@ RSYNC_FILES_VANISHED = 24
 RSYNC_FILES_ALSO_VANISHED = 6144
 RSYNC_FILES_COULD_NOT_BE_TRANSFERRED = 23
 
-class RsyncMethod():
+class BaseMethod():
+    def __init__(self):
+        pass
+        
+    def buildCommand(self, src, dest):
+        pass
+        
+    def run(self):
+        pass
+
+class RsyncMethod(BaseMethod):
     """a method of doing backups using rsync"""
     
     def __init__(self, settings, meta, log, comms, dry_run=False):
@@ -45,7 +55,8 @@ class RsyncMethod():
         self.dry_run = dry_run
         self.cmd = None
 
-        self.exclude_file = os.path.join(os.environ['HOME'], self.settings('settings-dir'), RSYNC_EXCLUDE_FILE)
+        self.exclude_file = os.path.join(os.environ['HOME'], self.settings('settings-dir'), 
+                                         RSYNC_EXCLUDE_FILE)
 
 
     def buildCommand(self, src, dest):
@@ -91,30 +102,35 @@ class RsyncMethod():
 
     def _interpretResults(self, status, output):
         """return true if status returned is 0 or a known set of non-zero values"""
+        result = False
         
         self.log.info("do_backup - status = [%d] %s" % (status, output))
 
         if status == 0:
             # record that a backup has been performed today
-            return True 
+            result = True 
 
-        if status == RSYNC_FILES_VANISHED or status == RSYNC_FILES_ALSO_VANISHED \
+        elif status == RSYNC_FILES_VANISHED or status == RSYNC_FILES_ALSO_VANISHED \
             or output.find("some files vanished") > -1: 
             # ignore files vanished warning
             # record that a backup has been performed today
             # pylint: disable=line-too-long
             self.log.info("Some files vanished (code 24 or 6144) - Filesystem changed after backup started.")
-            return True
+            result = True
 
-        if status == RSYNC_FILES_COULD_NOT_BE_TRANSFERRED: 
+        elif status == RSYNC_FILES_COULD_NOT_BE_TRANSFERRED: 
             # some files could not be transferred - permission denied at source ignore this error,
             # files probably not owned by current user record that a backup has been performed 
             # today.
             # pylint: disable=line-too-long
             self.log.info("Some files could not be transferred (code 23) - look for files/folders you cannot read.")
-            return True
+            result = True
 
-        return False
+        else:
+            # rsync returned a status not previously handled so log it and return False
+            self.log.info(f"rsync returned '{output}' (code {status})")
+            
+        return result
 
     def _create_exclude_file(self):
         """create the rsync exclusions file"""
@@ -126,9 +142,10 @@ class RsyncMethod():
         self.log.info("rsync exclusions file created at %s" % self.exclude_file)
 
         if self.settings('debug-level') > 0:
-            self.log.debug("_create_exclude_file() - EXCLUDES = \n%s" % excludes_file_list)
-            self.log.debug("_create_exclude_file() - %s exists %s" % (self.exclude_file), 
-                                                                      os.path.exists(self.exclude_file))
+            # pylint: disable=line-too-long
+            self.log.debug("_create_exclude_file() - EXCLUDES = \n%s" % exclude_file_list)
+            self.log.debug("_create_exclude_file() - %s exists %s" % (self.exclude_file, 
+                                                                      os.path.exists(self.exclude_file)))
 
     def _remove_exclude_file(self):
         """delete the rsync exclusions file"""
@@ -139,37 +156,3 @@ class RsyncMethod():
             self.log.info("rsync exclusions file does not exist.")
 
 
-class FakeLog(logging.Logger):
-    def __init__(self):
-        self.val = {'info':[], 'debug':[], 'error':[]}
-
-    def getVal(self,key):
-        return "|".join(self.val[key])
-
-    def info(self, val):
-        self.val['info'].append(val)
-
-    def debug(self, val):
-        self.val['debug'].append(val)
-
-    def error(self, val):
-        self.val['error'].append(val)
-        #print(val)
-
-
-if __name__ == '__main__':
-    
-    from myowncrashplan import CONFIG_FILE
-
-    # instantiate some util classes
-    errlog = FakeLog()
-    settings = Settings(CONFIG_FILE, errlog)
-    comms = RemoteComms(settings, errlog)
-    meta = MetaData(errlog, comms, settings)
-    comms = RemoteComms(settings, errlog)
-    
-    rsync = RsyncMethod(settings, meta, errlog, comms)
-
-    rsync.buildCommand("/Users/judge", "/zdata/myowncrashplan/Prometheus.local/WORKING")
-    
-    print(rsync.cmd)

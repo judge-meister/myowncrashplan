@@ -30,12 +30,11 @@ used for linking.
 """
 
 import os
-import shlex
 import logging
 from Settings import Settings
 from RemoteComms import RemoteComms
 from MetaData import MetaData
-from Utils import TimeDate, process
+from Utils import TimeDate
 from CrashPlanError import CrashPlanError
 
 RSYNC_SUCCESS = 0
@@ -68,10 +67,10 @@ class CrashPlan():
         """
         call rsync for each folder in list of backup sources
         """
-        self.settings.create_excl_file()
+        #self.settings.create_excl_file()
         sources = [os.environ['HOME']]
 
-        for extra in self.settings("backup-sources-extra-list"):
+        for extra in self.settings("extra-backup-sources-list"):
 
             if extra != '' and os.path.exists(extra):
                 sources.append(extra)
@@ -88,7 +87,7 @@ class CrashPlan():
         self.backup_successful = (count == len(sources) and not self.dry_run)
         print("Backup successful? ", self.backup_successful, "len(sources) = ", len(sources))
         print("sources: ", sources)
-        self.settings.remove_excl_file()
+        #self.settings.remove_excl_file()
 
     def backupFolder(self, src):
         """
@@ -103,7 +102,7 @@ class CrashPlan():
         destination = os.path.join(self.settings('backup-destination'), 
                                    self.local_hostname, "WORKING")
 
-        self.method.buildCommand(destination)
+        self.method.buildCommand(src, destination)
 
         self.log.info("Start Backing Up to - %s" % destination)
         

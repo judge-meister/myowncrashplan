@@ -48,6 +48,7 @@ from CrashPlan import CrashPlan
 from RemoteComms import RemoteComms
 from Settings import Settings, default_settings_json
 from MetaData import MetaData
+from RsyncMethod import RsyncMethod
 from Utils import TimeDate
 
 BACKUPLOG_FILE = os.path.join(os.environ['HOME'], ".myocp", "backup.log")
@@ -218,6 +219,7 @@ def main():
     settings = Settings(CONFIG_FILE, errlog)
     comms = RemoteComms(settings, errlog)
     meta = MetaData(errlog, comms, settings)
+    rsync = RsyncMethod(settings, meta, errlog, comms, dry_run)
     
     if backupAlreadyRunning(errlog):
         sys.exit(0)
@@ -245,7 +247,7 @@ def main():
         if comms.remoteSpace() <= settings('maximum-used-percent'):
             errlog.info("There is enough space for the next backup.")
 
-            mcp = CrashPlan(settings, meta, errlog, comms, dry_run)
+            mcp = CrashPlan(settings, meta, errlog, comms, rsync, dry_run)
             mcp.doBackup()
             mcp.finishUp()
             

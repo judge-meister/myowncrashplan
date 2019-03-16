@@ -77,6 +77,7 @@ class Settings():
     def verify(self):
         """verify settings are consistent"""
         expected_keys = ['exclude-files', 'exclude-folders', 'settings-dir',
+                         'backup-destination',
                          'extra-backup-sources', 'server-name', 'maximum-used-percent']
         unexpected_keys = ['rsync-excludes-list']
         

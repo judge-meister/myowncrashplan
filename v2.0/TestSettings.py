@@ -170,6 +170,7 @@ class TestSettings(unittest.TestCase):
     def test_settings_verify_1(self):
         """verify that verify fails when there are missing keys"""
         jstr = """{ "debug-level": false,
+            "backup-destination": "mydest",
             "exclude-files": "",
             "exclude-folders": "",
             "settings-dir": "test_myocp",
@@ -190,6 +191,7 @@ class TestSettings(unittest.TestCase):
     def test_settings_verify_2(self):
         """verify that verify fails when unexpected keys are in the settings file"""
         jstr = """{ "debug-level": false,
+            "backup-destination": "mydest",
             "exclude-files": "",
             "exclude-folders": "",
             "rsync-excludes-list": "",
@@ -212,6 +214,7 @@ class TestSettings(unittest.TestCase):
     def test_settings_verify_3(self):
         """verify that verify fails in server-name is empty"""
         jstr = """{ "debug-level": false,
+            "backup-destination": "mydest",
             "exclude-files": "",
             "exclude-folders": "",
             "settings-dir": "test_myocp",
@@ -236,6 +239,7 @@ class TestSettings(unittest.TestCase):
     def test_settings_verify_4(self, mock_mkdir):
         """verify that verify responds correctly to hostname errors"""
         jstr = """{ "debug-level": false,
+            "backup-destination": "mydest",
             "exclude-files": "",
             "exclude-folders": "",
             "settings-dir": "test_myocp",
@@ -268,6 +272,7 @@ class TestSettings(unittest.TestCase):
     def test_settings_verify_5(self, mock_mkdir):
         """verify that verify completes its verification with 2 extra backup dirs"""
         jstr = """{ "debug-level": false,
+            "backup-destination": "mydest",
             "exclude-files": "",
             "exclude-folders": "",
             "settings-dir": "test_myocp",
@@ -301,6 +306,7 @@ class TestSettings(unittest.TestCase):
     def test_settings_verify_6(self, mock_mkdir):
         """verify that verify completes its verification with 1 extra backup dir"""
         jstr = """{ "debug-level": false,
+            "backup-destination": "mydest",
             "exclude-files": ".a,.b",
             "exclude-folders": "c,d",
             "settings-dir": "test_myocp",
