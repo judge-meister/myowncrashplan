@@ -50,7 +50,7 @@ from MetaData import MetaData
 from RemoteComms import RemoteComms
 from RsyncMethod import RsyncMethod
 from Settings import Settings, default_settings_json
-from Utils import TimeDate, backupAlreadyRunning, weHaveBackedUpToday
+from Utils import TimeDate, backupAlreadyRunning#, weHaveBackedUpToday
 
 BACKUPLOG_FILE = os.path.join(os.environ['HOME'], ".myocp", "backup.log")
 ERRORLOG_FILE = os.path.join(os.environ['HOME'], ".myocp", "error.log")
@@ -121,6 +121,19 @@ def get_opts(argv):
         
     return options
 
+def weHaveBackedUpToday(comms, log, settings):
+    """this relies on remote metadata, which could be stored locally also"""
+    assert isinstance(comms, RemoteComms)
+    assert isinstance(log, logging.Logger)
+    assert isinstance(settings, Settings)
+
+    meta = MetaData(log, comms, settings)
+    meta.readMetaData()
+    
+    if meta.get('backup-today') == TimeDate.today():
+        return True
+    return False
+
 
 def createLogger():
     """create a logger"""
@@ -156,7 +169,7 @@ def main():
         install()
         sys.exit()
         
-    elif option['uninstall']:
+    elif options['uninstall']:
         uninstall()
         sys.exit()
 
