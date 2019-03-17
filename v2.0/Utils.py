@@ -7,7 +7,12 @@ Small utility classes
 """
 
 import time
+import logging
 import subprocess
+
+from RemoteComms import RemoteComms
+from Settings import Settings
+from MetaData import MetaData
 
 
 class TimeDate():
@@ -58,5 +63,35 @@ def process(cmd, log=None):
     #print(f"(process) rt = {rt}")
     #print(f"(process) st = {st}")
     return st, rt
+
+
+def backupAlreadyRunning(errlog):
+    """is the backup already running?
+     - this works for MacOs and Linux
+    """
+    pid = os.getpid()
+    pidof = "ps -eo pid,command | grep -i 'python .*myowncrashplan' "
+    pidof += "| grep -v grep | awk -F' ' '{print $1}' | grep -v '^%d$'" % pid
+    _st, out = unix(pidof)
+
+    if out != "":
+        errlog.info("Backup already running. [pid %s], so exit here." % (out))
+        return True
+
+    return False
+
+
+def weHaveBackedUpToday(comms, log, settings):
+    """this relies on remote metadata, which could be stored locally also"""
+    assert isinstance(comms, RemoteComms)
+    assert isinstance(log, logging.Logger)
+    assert isinstance(settings, Settings)
+
+    meta = MetaData(log, comms, settings)
+    meta.readMetaData()
+    
+    if meta.get('backup-today') == TimeDate.today():
+        return True
+    return False
 
 
