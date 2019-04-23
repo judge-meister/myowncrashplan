@@ -18,7 +18,7 @@ from MetaData import MetaData
 from CrashPlan import CrashPlan
 from RsyncMethod import BaseMethod
 from CrashPlanError import CrashPlanError
-
+from CrashPlan import CrashPlanErrorCodes
 
 class FakeLog(logging.Logger):
     def __init__(self):
@@ -41,6 +41,7 @@ class FakeRemoteComms(RemoteComms):
         # hijacking input
         self.filename = ""
         self.status = settings
+        self.settings = settings
         self.message = log
         
     def remoteCommand(self, cmd):
@@ -54,6 +55,12 @@ class FakeRemoteComms(RemoteComms):
         
     def getBackupList(self):
         return ['one', 'two']
+        
+    def remoteSpace(self):
+        return 75
+
+    def removeOldestBackup(self, which):
+        pass
         
 
 class FakeMetaData(MetaData):
@@ -97,7 +104,7 @@ class TestCrashPlan(unittest.TestCase):
     def test_backupFolder(self):
         """verify backupFolder"""
         CP = CrashPlan(self.settings, self.meta, self.log, self.comms, self.method, False)
-        with patch.object(BaseMethod, "run", return_value=True) as mock_run:
+        with patch.object(BaseMethod, "run", return_value=CrashPlanErrorCodes.SUCCESS) as mock_run:
             with patch.object(BaseMethod, "buildCommand", return_value=True) as mock_build:
                 CP.backupFolder(os.environ['HOME'])
         assert mock_build.called
@@ -108,15 +115,30 @@ class TestCrashPlan(unittest.TestCase):
     def test_do_backup(self):
         """verify do_backup"""
         CP = CrashPlan(self.settings, self.meta, self.log, self.comms, self.method, False)
-        with patch.object(CrashPlan, "backupFolder", return_value=True) as mock_backup:
+        with patch.object(CrashPlan, "backupFolder", return_value=CrashPlanErrorCodes.SUCCESS) as mock_backup:
             with patch('sys.stdout', new_callable=StringIO) as mock_stdout:
                 CP.doBackup()
         assert mock_backup.called
         calls = [call(os.environ['HOME']), call('/bin')]
         mock_backup.assert_has_calls(calls, any_order=False)
-        stdout = "Backup successful?  True len(sources) =  2\nsources:  ['{0!s}', '/bin']\n".format(os.environ['HOME'])
-        assert mock_stdout.getvalue() == stdout
+        stdout = "Backup successful?  True len(sources) ==  2\nsources:  ['{0!s}', '/bin']\n".format(os.environ['HOME'])
+        self.assertEqual(mock_stdout.getvalue(), stdout)
 
+    def test_finishUp(self):
+        """verify finishUp"""
+        CP = CrashPlan(self.settings, self.meta, self.log, self.comms, self.method, False)
+        with patch('sys.stdout', new_callable=StringIO) as mock_stdout:
+            CP.backup_successful = True
+            CP.finishUp()
+        #assert mock_backup.called
+        #with patch.object(CrashPlan, "backupFolder", return_value=CrashPlanErrorCodes.SUCCESS) as mock_backup:
+
+    def test_deleteOldestBackup(self):
+        """verify deleteOldestBackup"""
+        CP = CrashPlan(self.settings, self.meta, self.log, self.comms, self.method, False)
+        with patch('sys.stdout', new_callable=StringIO) as mock_stdout:
+            CP.deleteOldestBackup()
+        
 
 if __name__ == '__main__':
 

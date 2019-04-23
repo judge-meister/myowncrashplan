@@ -110,8 +110,8 @@ class RemoteComms():
 
     def removeOldestBackup(self, oldest):
         """TBD - remove the oldest backup folder"""
-        self.log.info("RemoveOldestBackup(%s)" % oldest)
-        #cmd = f"rm -rf {oldest}"
-        #response = self.remoteCommand("rm -rf %s" % (oldest))
-        
+        self.log.info("RemoveOldestBackup( %s ) - SIMPLE IMPLEMENTATION - MAY FAIL!" % oldest.split('/')[-1])
+        cmd = f"rm -rf {oldest}"
+        response = self.remoteCommand("rm -rf %s" % (oldest))
+        #self.log.error(response)
 

@@ -39,7 +39,46 @@ def process(cmd, log=None):
     """execute a command using Popen and collect the output and return status.
     also there is a option to log an info message if log is defined.
     """
-    with subprocess.Popen(cmd, stdout=subprocess.PIPE, stderr=subprocess.PIPE) as proc:
+    with subprocess.Popen(cmd, stdout=subprocess.PIPE, stderr=subprocess.PIPE, bufsize=1) as proc:
+        res = []
+        while True:
+            stdOutStr = proc.stdout.readline()
+            stdErrStr = proc.stderr.readline()
+    
+            # If both are empty and there is an error code then stop.
+            if not stdOutStr and not stdErrStr and proc.returncode is not None:
+                break
+                
+            else:
+                if stdOutStr:
+                    res.append(stdOutStr.decode().replace('\n', ''))
+                    
+                    if log:
+                        log.info(stdOutStr.strip().decode())
+
+                if stdErrStr:
+                    res.append(stdErrStr.decode().replace('\n', ''))
+                    
+                    if log:
+                        log.info(stdErrStr.strip().decode())
+
+            proc.poll()
+
+        # Wait for the task to exit.
+        proc.wait()
+        
+        return_code = proc.returncode
+        return_text = '\n'.join(res)
+
+        return return_code, return_text
+
+
+def process_old(cmd, log=None):
+    """execute a command using Popen and collect the output and return status.
+    also there is a option to log an info message if log is defined.
+    """
+    #print("process - ",cmd)
+    with subprocess.Popen(cmd, stdout=subprocess.PIPE, stderr=subprocess.PIPE, bufsize=1) as proc:
         res = []
         while True:
             output = proc.stdout.readline()
@@ -50,14 +89,25 @@ def process(cmd, log=None):
 
             if output:
                 res.append(output.decode().replace('\n', ''))
+                
             if errout:
                 res.append(errout.decode().replace('\n', ''))
 
             if output and log:
                 try:
                     log.info(output.strip().decode())
+                    #print("LOG OUT -",output.strip().decode())
                 except UnicodeDecodeError:
                     log.info(output.strip())
+                    #print("LOG OUT2 -",output.strip())
+                    
+            if errout and log:
+                try:
+                    log.info(errout.strip().decode())
+                    #print("LOG ERR -",errout.strip().decode())
+                except UnicodeDecodeError:
+                    log.info(errout.strip())
+                    #print("LOG ERR2 -",errout.strip())
 
     st = proc.poll()
     rt = '\n'.join(res)
@@ -81,7 +131,4 @@ def backupAlreadyRunning(errlog):
         return True
 
     return False
-
-
-
 

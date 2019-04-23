@@ -23,6 +23,14 @@ Still To Do
 symlinks, because smbfs mounts do not.  If using a usb drive then it would 
 have to be formatted with something that does supported it.
 
+Ideas
+=====
+When backup up to a USB drive or filesystem that does not support symbolic
+and hard links, then may be try something like a sparsebundle (macos feature) 
+as a container. 
+
+For Windows more research is required.
+
 """
 
 import sys
@@ -150,7 +158,9 @@ def createLogger():
     ch.setLevel(logging.ERROR)
 
     # create formatter and add it to the handlers
-    formatter = logging.Formatter('%(asctime)s [%(process)d] %(levelname)s - %(message)s')
+    formatter = logging.Formatter(fmt='%(asctime)s [%(process)d] %(levelname)s - %(message)s',
+                                  datefmt='%Y/%m/%d %H:%M:%S')
+    #formatter = logging.Formatter('%Y/%m/%d %H:%M:%S [%(process)d] %(levelname)s - %(message)s')
     fh.setFormatter(formatter)
     ch.setFormatter(formatter)
 
@@ -175,6 +185,9 @@ def main():
 
     errlog = createLogger()
 
+    errlog.info("")
+    errlog.info("Starting New Backup.")
+
     initialise(errlog)
 
     # instantiate some util classes
@@ -198,20 +211,25 @@ def main():
             errlog.info("We Have Already Backed Up Today, but we are running another backup anyway.")
             
         # Is There Enough Space or can space be made available
-        backup_list = comms.getBackupList()
-        oldest = backup_list[0]
+        #backup_list = comms.getBackupList()
+        #oldest = backup_list[0]
         
-        while comms.remoteSpace() > settings('maximum-used-percent') and len(backup_list) > 1:
-            comms.removeOldestBackup(oldest)
-            backup_list = comms.getBackupList()
-            oldest = backup_list[0]
+        #try_anyway = False
+        #while comms.remoteSpace() > settings('maximum-used-percent') and len(backup_list) > 1:
+        #    comms.removeOldestBackup(oldest)
+        #    backup_list = comms.getBackupList()
+        #    oldest = backup_list[0]
+        #    # temporarily stop here
+        #    try_anyway = True
+        #    break #sys.exit()
 
-        if comms.remoteSpace() <= settings('maximum-used-percent'):
-            errlog.info("There is enough space for the next backup.")
+        #try_anyway = True
+        #if comms.remoteSpace() <= settings('maximum-used-percent') or try_anyway:
+        #    errlog.info("There is enough space for the next backup.")
 
-            mcp = CrashPlan(settings, meta, errlog, comms, rsync, options['dry_run'])
-            mcp.doBackup()
-            mcp.finishUp()
+        mcp = CrashPlan(settings, meta, errlog, comms, rsync, options['dry_run'])
+        mcp.doBackup()
+        mcp.finishUp()
             
 
 

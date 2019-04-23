@@ -31,16 +31,19 @@ used for linking.
 
 import os
 import logging
+from enum import Enum
 from Settings import Settings
 from RemoteComms import RemoteComms
 from MetaData import MetaData
 from Utils import TimeDate
 from CrashPlanError import CrashPlanError
 
-RSYNC_SUCCESS = 0
-RSYNC_FILES_VANISHED = 24
-RSYNC_FILES_ALSO_VANISHED = 6144
-RSYNC_FILES_COULD_NOT_BE_TRANSFERRED = 23
+class CrashPlanErrorCodes(Enum):
+    NOT_RUN = 0
+    SUCCESS = 1
+    FAILURE = 2
+    DISK_FULL = 2
+    UNKNOWN_ERROR = 99
 
 
 class CrashPlan():
@@ -67,7 +70,6 @@ class CrashPlan():
         """
         call rsync for each folder in list of backup sources
         """
-        #self.settings.create_excl_file()
         sources = [os.environ['HOME']]
 
         for extra in self.settings("extra-backup-sources-list"):
@@ -75,20 +77,34 @@ class CrashPlan():
             if extra != '' and os.path.exists(extra):
                 sources.append(extra)
         try:
-            count = 0
+            successes = 0
 
             for src in sources:
-                if self.backupFolder(src):
-                    count += 1
+                result = CrashPlanErrorCodes.NOT_RUN
+                if self.comms.remoteSpace() > self.settings('maximum-used-percent'):
+                    result = CrashPlanErrorCodes.DISK_FULL
+                    
+                while result in [CrashPlanErrorCodes.NOT_RUN, CrashPlanErrorCodes.DISK_FULL]:
+                    if result == CrashPlanErrorCodes.DISK_FULL:
+                        self.deleteOldestBackup()
+                    result = self.backupFolder(src)
+                    
+                if result == CrashPlanErrorCodes.SUCCESS:
+                    successes += 1
 
         except KeyboardInterrupt:
             self.log.info("Backup of %s was interrupted by user intevention" % src)
 
-        self.backup_successful = (count == len(sources) and not self.dry_run)
-        print("Backup successful? ", self.backup_successful, "len(sources) = ", len(sources))
+        self.backup_successful = (successes == len(sources) and not self.dry_run)
+        print("Backup successful? ", self.backup_successful, "len(sources) == ", len(sources))
         print("sources: ", sources)
-        #self.settings.remove_excl_file()
 
+    def deleteOldestBackup(self):
+        """if its not the last remaining backup then delete the oldest."""
+        backup_list = self.comms.getBackupList()
+        if len(backup_list) > 1:
+            self.comms.removeOldestBackup(backup_list[0])
+        
     def backupFolder(self, src):
         """
         NOTE: We always use the name WORKING for backups in progress and only rename 
@@ -104,11 +120,11 @@ class CrashPlan():
 
         self.method.buildCommand(src, destination)
 
-        self.log.info("Start Backing Up to - %s" % destination)
+        self.log.info("Start Backing Up of %s to - %s" % (src, destination))
         
         result = self.method.run()
 
-        self.log.info("Backup of %s was %ssuccessful\n" % (src, '' if result else 'not '))
+        self.log.info("Backup of %s was %ssuccessful\n" % (src, '' if result == CrashPlanErrorCodes.SUCCESS else 'not '))
 
         return result
 

@@ -16,7 +16,7 @@ from Settings import Settings
 from RemoteComms import RemoteComms
 from MetaData import MetaData
 from RsyncMethod import RsyncMethod
-
+from CrashPlan import CrashPlanErrorCodes
 
 class FakeLog(logging.Logger):
     def __init__(self):
@@ -73,8 +73,10 @@ class FakeStdOut():
 class FakeProc():
     stdout = FakeStdOut()
     stderr = FakeStdOut()
+    #returncode = None
 
     def poll():
+        #returncode = 1
         return 0
 
 
@@ -111,14 +113,14 @@ class TestRsyncMethod(unittest.TestCase):
         rsync = RsyncMethod(self.settings, self.meta, self.log, self.comms, False)
         rsync.settings.set("backup-destination", '/tmp')
         rsync.buildCommand("/Users/judge", "/zdata/myowncrashplan/Prometheus.local/WORKING")
-        self.assertEqual(rsync.cmd, 'rsync -av --link-dest=../two --bwlimit=2500 --timeout=300 --delete --delete-excluded  --exclude-from=/Users/judge/test_myocp/myocp_excl /Users/judge "15.0.0.1:/zdata/myowncrashplan/Prometheus.local/WORKING" ')
+        self.assertEqual(rsync.cmd, 'rsync -av --log-file=/Users/judge/.myocp/backup.log --link-dest=../two --bwlimit=2500 --timeout=300 --delete --delete-excluded  --exclude-from=/Users/judge/test_myocp/myocp_excl /Users/judge "15.0.0.1:/zdata/myowncrashplan/Prometheus.local/WORKING" ')
 
     def test_buildCommand_2(self):
         """verify buildCommand returns expected string"""
         rsync = RsyncMethod(self.settings, self.meta, self.log, self.comms, True)
         rsync.settings.set("backup-destination", '/tmp')
         rsync.buildCommand("/Users/judge", "/zdata/myowncrashplan/Prometheus.local/WORKING")
-        self.assertEqual(rsync.cmd, 'rsync -av --dry-run --link-dest=../two --bwlimit=2500 --timeout=300 --delete --delete-excluded  --exclude-from=/Users/judge/test_myocp/myocp_excl /Users/judge "15.0.0.1:/zdata/myowncrashplan/Prometheus.local/WORKING" ')
+        self.assertEqual(rsync.cmd, 'rsync -av --log-file=/Users/judge/.myocp/backup.log --dry-run --link-dest=../two --bwlimit=2500 --timeout=300 --delete --delete-excluded  --exclude-from=/Users/judge/test_myocp/myocp_excl /Users/judge "15.0.0.1:/zdata/myowncrashplan/Prometheus.local/WORKING" ')
 
     def test__create_excl_file_1(self):
         """verify rsync_excl fie is  created."""
@@ -128,7 +130,7 @@ class TestRsyncMethod(unittest.TestCase):
         self.assertTrue(os.path.exists(rsync.exclude_file))
         self.assertEqual(self.log.getVal('info').split('|')[0], 'Settings file loaded.')
         self.assertEqual(self.log.getVal('info').split('|')[1], 'Settings file verified.')
-        self.assertEqual(self.log.getVal('info').split('|')[2], 'rsync exclusions file created at %s/temp/myocp_excl' % os.environ['HOME'])
+        #self.assertEqual(self.log.getVal('info').split('|')[2], 'rsync exclusions file created at %s/temp/myocp_excl' % os.environ['HOME'])
         with open(rsync.exclude_file, 'r') as fp:
             self.assertEqual(fp.read(), ".a\n.b\nc\nd")
         os.unlink(rsync.exclude_file)
@@ -142,7 +144,7 @@ class TestRsyncMethod(unittest.TestCase):
         self.assertTrue(os.path.exists(rsync.exclude_file))
         self.assertEqual(self.log.getVal('info').split('|')[0], 'Settings file loaded.')
         self.assertEqual(self.log.getVal('info').split('|')[1], 'Settings file verified.')
-        self.assertEqual(self.log.getVal('info').split('|')[2], 'rsync exclusions file created at %s/temp/myocp_excl' % os.environ['HOME'])
+        #self.assertEqual(self.log.getVal('info').split('|')[2], 'rsync exclusions file created at %s/temp/myocp_excl' % os.environ['HOME'])
         with open(rsync.exclude_file, 'r') as fp:
             self.assertEqual(fp.read(), ".a\n.b\nc\nd")
         os.unlink(rsync.exclude_file)
@@ -169,7 +171,7 @@ class TestRsyncMethod(unittest.TestCase):
         self.assertFalse(os.path.exists(rsync.exclude_file))
         self.assertEqual(self.log.getVal('info').split('|')[0], 'Settings file loaded.')
         self.assertEqual(self.log.getVal('info').split('|')[1], 'Settings file verified.')
-        self.assertEqual(self.log.getVal('info').split('|')[2], 'rsync exclusions file removed.')
+        #self.assertEqual(self.log.getVal('info').split('|')[2], 'rsync exclusions file removed.')
 
     @patch('subprocess.Popen')
     def test_run(self, mock_subproc_popen):
@@ -179,6 +181,7 @@ class TestRsyncMethod(unittest.TestCase):
         proc_mock.configure_mock(**attrs)
         proc_mock.__enter__ = Mock(return_value=FakeProc)
         proc_mock.__exit__ = Mock(return_value=0)
+        #proc_mock.returncode
         mock_subproc_popen.returncode.return_value = 'abc'
         mock_subproc_popen.return_value = proc_mock 
         
@@ -194,40 +197,40 @@ class TestRsyncMethod(unittest.TestCase):
         rsync = RsyncMethod(self.settings, self.meta, self.log, self.comms, False)
         st, rt = (2, "unknown error")
         result = rsync._interpretResults(st, rt)
-        self.assertFalse(result)
+        self.assertEqual(result, CrashPlanErrorCodes.UNKNOWN_ERROR)
         self.assertEqual(self.log.getVal('info').split('|')[0], 'Settings file loaded.')
         self.assertEqual(self.log.getVal('info').split('|')[1], 'Settings file verified.')
-        self.assertEqual(self.log.getVal('info').split('|')[2], f"do_backup - status = [{st}] {rt}")
+        self.assertEqual(self.log.getVal('info').split('|')[2], f"do_backup - status = [{st}]")
         self.assertEqual(self.log.getVal('info').split('|')[3], f"rsync returned '{rt}' (code {st})")
 
         st, rt = (24, "")
         result = rsync._interpretResults(st, rt)
-        self.assertTrue(result)
-        self.assertEqual(self.log.getVal('info').split('|')[4], f"do_backup - status = [{st}] {rt}")
+        self.assertEqual(result, CrashPlanErrorCodes.SUCCESS)
+        self.assertEqual(self.log.getVal('info').split('|')[4], f"do_backup - status = [{st}]")
         self.assertTrue(self.log.getVal('info').split('|')[5].startswith("Some files vanished (code 24 or 6144)"))
         
         st, rt = (1, "some vanished files")
         result = rsync._interpretResults(st, rt)
-        self.assertFalse(result)
-        self.assertEqual(self.log.getVal('info').split('|')[6], f"do_backup - status = [{st}] {rt}")
+        self.assertEqual(result, CrashPlanErrorCodes.UNKNOWN_ERROR)
+        self.assertEqual(self.log.getVal('info').split('|')[6], f"do_backup - status = [{st}]")
         self.assertEqual(self.log.getVal('info').split('|')[7], f"rsync returned '{rt}' (code {st})")
         
         st, rt = (6144, "")
         result = rsync._interpretResults(st, rt)
-        self.assertTrue(result)
-        self.assertEqual(self.log.getVal('info').split('|')[8], f"do_backup - status = [{st}] {rt}")
+        self.assertEqual(result, CrashPlanErrorCodes.SUCCESS)
+        self.assertEqual(self.log.getVal('info').split('|')[8], f"do_backup - status = [{st}]")
         self.assertTrue(self.log.getVal('info').split('|')[9].startswith("Some files vanished (code 24 or 6144)"))
         
         st, rt = (23, "")
         result = rsync._interpretResults(st, rt)
-        self.assertTrue(result)
-        self.assertEqual(self.log.getVal('info').split('|')[10], f"do_backup - status = [{st}] {rt}")
+        self.assertEqual(result, CrashPlanErrorCodes.SUCCESS)
+        self.assertEqual(self.log.getVal('info').split('|')[10], f"do_backup - status = [{st}]")
         self.assertTrue(self.log.getVal('info').split('|')[11].startswith("Some files could not be transferred (code 23)"))
         
         st, rt = (0, "")
         result = rsync._interpretResults(st, rt)
-        self.assertTrue(result)
-        self.assertEqual(self.log.getVal('info').split('|')[12], f"do_backup - status = [{st}] {rt}")
+        self.assertEqual(result, CrashPlanErrorCodes.SUCCESS)
+        self.assertEqual(self.log.getVal('info').split('|')[12], f"do_backup - status = [{st}]")
         self.assertEqual(len(self.log.getVal('info').split('|')), 13)
         
 
