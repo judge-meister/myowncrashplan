@@ -12,22 +12,22 @@ MyOwnCrashPlan
 
 myowncrashplan.py - backup script
 
-v2.0 - backup run on laptop sending files to server 
+v2.0 - backup run on laptop sending files to server
 
 Still To Do
 ===========
 
 - Record current status of running backup
 - remove oldest backup to free space - not the last one though
-- We need to check that the destination filesystem supports hardlinks and 
-symlinks, because smbfs mounts do not.  If using a usb drive then it would 
+- We need to check that the destination filesystem supports hardlinks and
+symlinks, because smbfs mounts do not.  If using a usb drive then it would
 have to be formatted with something that does supported it.
 
 Ideas
 =====
 When backup up to a USB drive or filesystem that does not support symbolic
-and hard links, then may be try something like a sparsebundle (macos feature) 
-as a container. 
+and hard links, then may be try something like a sparsebundle (macos feature)
+as a container.
 
 For Windows more research is required.
 
@@ -90,18 +90,19 @@ def Usage():
 
 def get_opts(argv):
     """parse the command line"""
-    sopt = 'hnf'
-    lopt = ['help', 'dry_run', 'force', 'install', 'uninstall']
-    
+    sopt = 'hnfs'
+    lopt = ['help', 'dry_run', 'force', 'size', 'install', 'uninstall']
+
     try:
         opts, _args = getopt.getopt(argv, sopt, lopt)
     except getopt.error as cause:
         print("\nError:  failed to parse options (%s)\n" % cause)
         Usage()
         sys.exit(2)
-        
+
     options = {'dry_run': False,
                'force': False,
+               'getsize': False,
                'install': False,
                'uninstall': False}
 
@@ -113,20 +114,23 @@ def get_opts(argv):
 
             if o in ('-n', '--dry_run'):
                 options['dry_run'] = True
-                
+
             if o in ('-f', '--force'):
                 options['force'] = True
-                
+
             if o == '--install':
                 options['install'] = True
-                
+
             if o == '--uninstall':
                 options['uninstall'] = True
+
+            if o in ('-s', '--size'):
+                options['getsize'] == True
 
     if options['install'] and options['uninstall']:
         print("ERROR: install and uninstall options are mutually exclusive.")
         sys.exit()
-        
+
     return options
 
 def weHaveBackedUpToday(comms, log, settings):
@@ -137,7 +141,7 @@ def weHaveBackedUpToday(comms, log, settings):
 
     meta = MetaData(log, comms, settings)
     meta.readMetaData()
-    
+
     if meta.get('backup-today') == TimeDate.today():
         return True
     return False
@@ -167,7 +171,7 @@ def createLogger():
     # add the handlers to the logger
     logger.addHandler(fh)
     logger.addHandler(ch)
-    
+
     return logger
 
 
@@ -178,7 +182,7 @@ def main():
     if options['install']:
         install()
         sys.exit()
-        
+
     elif options['uninstall']:
         uninstall()
         sys.exit()
@@ -194,14 +198,14 @@ def main():
     settings = Settings(CONFIG_FILE, errlog)
     comms = RemoteComms(settings, errlog)
     meta = MetaData(errlog, comms, settings)
-    rsync = RsyncMethod(settings, meta, errlog, comms, options['dry_run'])
-    
+    rsync = RsyncMethod(settings, meta, errlog, comms, options['dry_run'], options['getsize'])
+
     if backupAlreadyRunning(errlog):
         sys.exit(0)
 
-    if comms.serverIsUp(): 
+    if comms.serverIsUp():
         errlog.info("The Server is Up. The backup might be able to start.")
-        
+
         comms.createRootBackupDir()
 
         if weHaveBackedUpToday(comms, errlog, settings) and not options['force']:
@@ -209,11 +213,11 @@ def main():
             sys.exit(0)
         elif weHaveBackedUpToday(comms, errlog, settings) and options['force']:
             errlog.info("We Have Already Backed Up Today, but we are running another backup anyway.")
-            
+
         # Is There Enough Space or can space be made available
         #backup_list = comms.getBackupList()
         #oldest = backup_list[0]
-        
+
         #try_anyway = False
         #while comms.remoteSpace() > settings('maximum-used-percent') and len(backup_list) > 1:
         #    comms.removeOldestBackup(oldest)
@@ -228,11 +232,12 @@ def main():
         #    errlog.info("There is enough space for the next backup.")
 
         mcp = CrashPlan(settings, meta, errlog, comms, rsync, options['dry_run'])
+        mcp.getSize()
+        sys.exit()
         mcp.doBackup()
         mcp.finishUp()
-            
+
 
 
 if __name__ == '__main__':
     main()
-
