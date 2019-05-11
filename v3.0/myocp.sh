@@ -92,7 +92,7 @@ function remove_remote_folder()
 
 function get_backup_list()
 {
-  local cmd="ls -d "${backup_destination}"/"${local_host}"/20* | sort"
+  local cmd="ls -d "${backup_destination}"/"${local_host}"/20* | sort | $*"
   local ans=$(ssh -q ${server_host} ${cmd} | cut -d'/' -f5)
   (>&2 echo "DEBUG: get_backup_list = "${ans})
   echo ${ans}
@@ -101,7 +101,7 @@ function get_oldest_backup_name()
 {
   #local cmd="ls -d "${backup_destination}"/"${local_host}"/20* | sort | head -1"
   #local ans=$(ssh -q ${server_host} ${cmd} | cut -d'/' -f5)
-  ans=$(echo $(get_backup_list) | head -1)
+  ans=$(echo $(get_backup_list head -1))
   (>&2 echo "DEBUG: get_oldest_backup_name = "${ans})
   echo ${ans}
 }
@@ -109,7 +109,7 @@ function get_latest_backup_name()
 {
   #local cmd="ls -d "${backup_destination}"/"${local_host}"/20* | sort | tail -1"
   #local ans=$(ssh -q ${server_host} ${cmd} | cut -d'/' -f5)
-  ans=$(echo $(get_backup_list) | tail -1)
+  ans=$(echo $(get_backup_list tail -1))
   (>&2 echo "DEBUG: get_latest_backup_name = "${ans})
   echo ${ans}
 }
