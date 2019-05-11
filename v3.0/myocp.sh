@@ -9,11 +9,11 @@
 DEBUG=1
 
 server_host=192.168.0.7
-local_host=Prometheus.local
+local_host=$(hostname)
 backup_destination=/zdata/myowncrashplan
 log_file=/Users/judge/.myocp/backup.log
 exclude_file=/Users/judge/.myocp/myocp_excl
-src_folders="/Users/judge /Volumes/Nifty128"
+src_folders="/Users/judge"
 previous_backup=
 RSYNC_CMD="/opt/local/bin/rsync -av --bwlimit=2500 --timeout=300 --delete --delete-excluded "
 
@@ -30,7 +30,7 @@ function space_available()
 
 function space_required()
 {
-  local cmd=${RSYNC_CMD}" --dry-run"
+  local cmd=${RSYNC_CMD}" --dry-run --stats"
   cmd=${cmd}" --log-file="${log_file}
   cmd=${cmd}" --link-dest=../"${previous_backup}
   cmd=${cmd}" --exclude-from="${exclude_file}
